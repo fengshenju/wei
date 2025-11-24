@@ -86,3 +86,6 @@ chromedriver*
 # Config
 config/local_settings.py
 .env.local
+
+# 忽略 data 文件夹及其所有内容
+data/
