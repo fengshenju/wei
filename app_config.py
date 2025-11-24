@@ -19,4 +19,9 @@ CONFIG = {
     "max_job_count": 15,
     "chrome_address": "192.168.50.207:9333",
     "base_url": "https://a1.scm321.com/Admin/Dashboard",
+
+    # 待处理图片的本地文件夹路径 (请修改为您实际的图片文件夹)
+    'image_source_dir': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/images',
+
+    'data_storage_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/processed_data',
 }
