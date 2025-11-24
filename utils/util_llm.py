@@ -116,15 +116,8 @@ if __name__ == "__main__":
     # 假设你有一张测试图片放在同一目录下，或者输入绝对路径
     test_image = "/Users/fengshenju/Desktop/aaa.jpg"  # 请修改为实际存在的图片路径
 
-    # 你的业务 Prompt：告诉它读取哪些数据
-    my_prompt = """
-    这张图片是一张采购单据的照片，包含多个字段的信息。
-    请提取以下关键信息，并按 JSON 格式返回：
-    1. 款号
-    2. 交付日期
-    3. 单价、数量、单位
-    4. 采购商名称、供应商名称
-    """
+    # 从配置文件读取提示词
+    my_prompt = CONFIG.get('prompt_instruction', '')
 
     # 只有当文件存在时才运行测试
     if os.path.exists(test_image):

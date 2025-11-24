@@ -1,7 +1,7 @@
 import os
 import json
 import pathlib
-
+import pandas as pd
 
 class DataManager:
     def __init__(self, storage_path_str):
@@ -23,6 +23,7 @@ class DataManager:
                 raise e
         else:
             print(f">>> 连接到数据存储目录: {self.data_dir}")
+
 
     def get_json_path(self, image_filename):
         """根据图片文件名，生成对应的 json 文件路径"""
@@ -53,3 +54,45 @@ class DataManager:
             with open(json_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         return None
+
+def load_style_db_from_excel(file_path, column_name='款式编号'):
+        """
+        读取 Excel 文件中的指定列，加载为 set 集合
+        :param file_path: Excel 文件路径
+        :param column_name: 包含款号的列名 (默认: 款式编号)
+        :return: 包含所有款号的 set 集合
+        """
+        if not os.path.exists(file_path):
+            print(f"!!! 错误: 款号库文件未找到: {file_path}")
+            return set()
+
+        print(f">>> 正在读取款号库 Excel: {os.path.basename(file_path)} ...")
+
+        try:
+            # 使用 pandas 读取 excel
+            # engine='openpyxl' 专门用于读取 .xlsx 文件
+            df = pd.read_excel(file_path, engine='openpyxl')
+
+            # 检查列名是否存在
+            if column_name not in df.columns:
+                print(f"!!! 错误: Excel中未找到列名 '{column_name}'，现有列: {list(df.columns)}")
+                return set()
+
+            # 1. 提取该列
+            # 2. dropna() 去除空行
+            # 3. astype(str) 强制转为字符串 (防止纯数字款号被当成数字)
+            # 4. str.strip() 去除首尾空格
+            clean_series = df[column_name].dropna().astype(str).str.strip()
+
+            # 转换为集合 (自动去重)
+            style_set = set(clean_series)
+
+            print(f">>> 款号库加载成功! 共加载 {len(style_set)} 个唯一款号。")
+            # 打印前5个看看样子，确保没读错
+            print(f"    示例数据: {list(style_set)[:5]}")
+
+            return style_set
+
+        except Exception as e:
+            print(f"!!! 读取 Excel 失败: {e}")
+            return set()

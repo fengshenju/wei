@@ -11,57 +11,106 @@ from DrissionPage import Chromium, ChromiumOptions
 # 导入配置和工具
 from app_config import CONFIG
 from utils.util_time import get_random_wait
-from utils.llm_utils import extract_data_from_image
-from utils.data_manager import DataManager
+from utils.util_llm import extract_data_from_image
+from utils.data_manager import DataManager,load_style_db_from_excel
 
-# 定义提取数据的 Prompt (根据您的单据内容调整)
-PROMPT_INSTRUCTION = """
-这是一张采购单据。请提取以下信息并以JSON返回：
-1. 交付日期 (delivery_date)
-2. 采购商名称 (buyer_name)
-3. 供应商名称 (supplier_name)
-4. 商品明细列表 (items)，包含：款号(style_no), 数量(qty), 单价(price), 单位(unit)
-"""
+# 从配置文件获取提示词
+PROMPT_INSTRUCTION = CONFIG.get('prompt_instruction', '')
 
+# 假设这是你的本地款号库（从数据库或文件加载）
+LOCAL_STYLE_DB = {"T8821", "H2005", "X3002", "D5001"}
 
-def process_single_bill_rpa(tab, data_json, file_name):
+# 根据规则确定最终款号
+def determine_final_style(json_data, style_db):
     """
-    【核心业务逻辑】
-    针对单个单据的 RPA 操作。
-    这里拿到的是一整张单据的数据（含表头和明细列表）。
+    根据业务规则从 candidates 中选出最终款号
+    :param json_data: LLM 返回的 JSON
+    :param style_db: 本地款号库 (Set集合)
     """
-    print(f"\n--- 开始执行 RPA 任务: {file_name} ---")
+    candidates = json_data.get("style_candidates", [])
+    if not candidates:
+        return None
 
-    # 1. 示例：打印表头信息
-    delivery_date = data_json.get('delivery_date', '未知日期')
-    buyer = data_json.get('buyer_name', '未知买家')
-    print(f"正在处理单据头: 日期[{delivery_date}] - 客户[{buyer}]")
+    # --- 规则 1: 识别明细中存在的款号 (位置在表格内且在库中) ---
+    for item in candidates:
+        clean_text = item['text'].strip()
+        # 这里直接用 style_db 进行 O(1) 复杂度的极速查找
+        if "表格" in item.get('position', '') and clean_text in style_db:
+            print(f"✅ 命中规则1 (表格内且在库): {clean_text}")
+            return clean_text
 
-    # TODO: 在这里编写实际的网页操作代码
-    # 比如:
-    # tab.ele('#date_field').input(delivery_date)
-    # tab.ele('#buyer_field').input(buyer)
+    # --- 规则 2: 识别红色字体 (若存在且在库中) ---
+    red_candidates = [c for c in candidates if c.get('is_red') == True]
+    for item in red_candidates:
+        clean_text = item['text'].strip()
+        if clean_text in style_db:
+            print(f"✅ 命中规则2 (红色字体且在库): {clean_text}")
+            return clean_text
 
-    # 2. 示例：循环处理明细
-    items = data_json.get('items', [])
-    print(f"该单据包含 {len(items)} 条明细，开始录入...")
+    # --- 规则 3: 兜底搜索 (符合 T/H/X/D 开头规律) ---
+    for item in candidates:
+        text = item['text'].strip().upper()
+        # 这里逻辑可根据需求调整：如果不在库里，但长得像，要不要？
+        # 下面代码假设：只要长得像就提取，作为最后的保底
+        if text.startswith(('T', 'H', 'X', 'D', 'L', 'S', 'F')):  # 我看你csv里还有L/S/F开头
+            print(f"✅ 命中规则3 (符合命名规律): {text}")
+            return text
 
-    for index, item in enumerate(items, 1):
-        style_no = item.get('style_no')
-        qty = item.get('qty')
-        print(f"  [{index}/{len(items)}] 录入款号: {style_no}, 数量: {qty}")
+    return None
 
-        # TODO: 在这里编写明细行的录入代码
-        # tab.ele('#add_line_btn').click()
-        # tab.ele('#style_input').input(style_no)
+def process_single_bill_rpa(tab,data_json, file_name):
+    """
+    针对单个单据的完整 RPA 流程
+    包括：连接 -> 唤醒窗口 -> 执行业务
+    """
+    print(f"\n--- [RPA阶段] 开始处理: {file_name} ---")
 
-        # 模拟一点随机延迟，像真人一样
-        time.sleep(get_random_wait(0.5, jitter=0.2))
+    # 1. 【新增】在任务内部初始化连接
+    # 每次调用这个函数，都会重新获取一次最新的浏览器对象的引用
+    # co = ChromiumOptions().set_address(CONFIG['chrome_address'])
+    # tab = Chromium(addr_or_opts=co).latest_tab
 
-    print(f"--- RPA 任务完成: {file_name} ---\n")
+    # 2. 【新增】把“唤醒/最大化”逻辑移到这里
+    # 这意味着：每处理一张单据，都会强制检查一遍窗口状态，确保它在最前面
+    print(f"[{file_name}] 正在激活浏览器窗口...")
+    try:
+        tab.set.window.normal()
+        time.sleep(0.5)
+        # 强制全屏/最大化
+        tab.set.window.full()
+    except Exception as e:
+        # 兜底方案：如果上面报错，尝试直接最大化
+        print(f"窗口调整警告: {e}")
+        tab.set.window.max()
 
+    # 3. 开始具体的业务操作 (和之前一样)
+    try:
+        # 示例：打开目标网页（如果每个单据都要从头开始填，这里可能需要 get 一下）
+        # tab.get(CONFIG['base_url'])
+
+        # 填表头...
+        delivery_date = data_json.get('delivery_date', '')
+        print(f"[{file_name}] 正在录入日期: {delivery_date}")
+        # tab.ele('#date').input(delivery_date)
+
+        # 填明细...
+        items = data_json.get('items', [])
+        for item in items:
+            print(f"[{file_name}] 录入明细: {item.get('style_no')}")
+            # ...
+
+    except Exception as e:
+        print(f"!!! [{file_name}] RPA执行出错: {e}")
+        raise e  # 抛出异常，让主循环知道这就出错了
 
 def main():
+    # 1. 初始化阶段：加载款号库 (Excel)
+    excel_path = CONFIG.get('style_db_path')
+    col_name = CONFIG.get('style_db_column', '款式编号')
+
+    # >>> 关键调用 <<<
+    LOCAL_STYLE_DB = load_style_db_from_excel(excel_path, col_name)
+
     # 1. 初始化数据管理器
     storage_path = CONFIG.get('data_storage_path')
 
@@ -92,16 +141,6 @@ def main():
     co = ChromiumOptions().set_address(CONFIG['chrome_address'])
     tab = Chromium(addr_or_opts=co).latest_tab
 
-    # 唤醒窗口 (使用之前测试过的稳定组合拳)
-    print(">>> 正在唤醒 Chrome...")
-    try:
-        tab.set.window.normal()
-        time.sleep(0.5)
-        tab.set.window.full()
-    except Exception as e:
-        print(f"窗口调整轻微异常(可忽略): {e}")
-        tab.set.window.max()
-
     # 4. 核心循环：遍历文件
     for img_path in image_files:
         file_name = os.path.basename(img_path)
@@ -115,6 +154,9 @@ def main():
         print(f"[处理中] 正在解析: {file_name} ...")
         # 调用您之前提供的 llm_utils
         parsed_data = extract_data_from_image(img_path, PROMPT_INSTRUCTION)
+        final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
+        parsed_data['final_selected_style'] = final_style
+        print(f"最终判定款号: {final_style}")
 
         # 简单错误检查
         if not parsed_data or 'error' in parsed_data:
