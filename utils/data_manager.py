@@ -1,6 +1,7 @@
 import os
 import json
 import pathlib
+import time
 import pandas as pd
 
 class DataManager:
@@ -96,3 +97,249 @@ def load_style_db_from_excel(file_path, column_name='款式编号'):
         except Exception as e:
             print(f"!!! 读取 Excel 失败: {e}")
             return set()
+
+
+class StyleDBCache:
+    """
+    款号库缓存管理器
+    功能：检查 Excel 文件修改时间，决定是否从缓存读取还是重新解析
+    """
+    
+    def __init__(self, excel_path, cache_dir=None):
+        """
+        初始化缓存管理器
+        :param excel_path: Excel 文件路径
+        :param cache_dir: 缓存目录，默认与 Excel 同目录
+        """
+        self.excel_path = excel_path
+        
+        # 如果未指定缓存目录，使用 Excel 文件同目录
+        if cache_dir is None:
+            cache_dir = os.path.dirname(excel_path)
+        
+        # 生成缓存文件路径
+        excel_filename = os.path.splitext(os.path.basename(excel_path))[0]
+        self.cache_path = os.path.join(cache_dir, f"{excel_filename}_cache.json")
+        
+    def _get_file_mtime(self, file_path):
+        """获取文件修改时间"""
+        try:
+            return os.path.getmtime(file_path)
+        except OSError:
+            return 0
+            
+    def _is_cache_valid(self):
+        """检查缓存是否有效（缓存文件存在且比 Excel 新）"""
+        if not os.path.exists(self.cache_path):
+            return False
+            
+        excel_mtime = self._get_file_mtime(self.excel_path)
+        cache_mtime = self._get_file_mtime(self.cache_path)
+        
+        return cache_mtime > excel_mtime
+        
+    def _save_cache(self, style_set):
+        """保存缓存到 JSON 文件"""
+        try:
+            cache_data = {
+                'style_list': list(style_set),
+                'cache_time': time.time(),
+                'source_excel': self.excel_path
+            }
+            with open(self.cache_path, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+            print(f">>> 缓存已保存: {os.path.basename(self.cache_path)}")
+            return True
+        except Exception as e:
+            print(f"!!! 保存缓存失败: {e}")
+            return False
+            
+    def _load_cache(self):
+        """从缓存文件读取数据"""
+        try:
+            with open(self.cache_path, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            style_set = set(cache_data['style_list'])
+            print(f">>> 从缓存加载款号库: {len(style_set)} 个款号")
+            return style_set
+        except Exception as e:
+            print(f"!!! 读取缓存失败: {e}")
+            return None
+            
+    def get_style_db(self, column_name='款式编号'):
+        """
+        获取款号库（优先从缓存，缓存无效时从 Excel 重新加载）
+        :param column_name: Excel 中存储款号的列名
+        :return: 包含所有款号的 set 集合
+        """
+        # 检查缓存是否有效
+        if self._is_cache_valid():
+            print(f">>> 检测到有效缓存，快速加载中...")
+            cached_data = self._load_cache()
+            if cached_data is not None:
+                return cached_data
+                
+        # 缓存无效，从 Excel 重新加载
+        print(f">>> 缓存无效或不存在，从 Excel 重新加载...")
+        style_set = load_style_db_from_excel(self.excel_path, column_name)
+        
+        # 保存新的缓存
+        if style_set:
+            self._save_cache(style_set)
+            
+        return style_set
+
+
+def load_style_db_with_cache(file_path, column_name='款式编号', cache_dir=None):
+    """
+    使用缓存机制加载款号库（推荐使用此函数替代 load_style_db_from_excel）
+    
+    :param file_path: Excel 文件路径
+    :param column_name: 包含款号的列名 (默认: 款式编号)
+    :param cache_dir: 缓存目录，默认与 Excel 同目录
+    :return: 包含所有款号的 set 集合
+    """
+    cache_manager = StyleDBCache(file_path, cache_dir)
+    return cache_manager.get_style_db(column_name)
+
+
+def load_supplier_db_from_excel(file_path):
+    """
+    读取 Excel 文件的第一列，加载月结供应商目录为 set 集合
+    :param file_path: Excel 文件路径
+    :return: 包含所有供应商名称的 set 集合
+    """
+    if not os.path.exists(file_path):
+        print(f"!!! 错误: 供应商目录文件未找到: {file_path}")
+        return set()
+
+    print(f">>> 正在读取供应商目录 Excel: {os.path.basename(file_path)} ...")
+
+    try:
+        # 使用 pandas 读取 excel
+        df = pd.read_excel(file_path, engine='openpyxl')
+
+        if df.empty:
+            print(f"!!! 错误: Excel文件为空")
+            return set()
+
+        # 读取第一列（索引为0），自动获取列名
+        first_column = df.iloc[:, 0]
+        
+        # 去除空值，转为字符串，去除首尾空格
+        clean_series = first_column.dropna().astype(str).str.strip()
+        
+        # 转换为集合 (自动去重)
+        supplier_set = set(clean_series)
+
+        print(f">>> 供应商目录加载成功! 共加载 {len(supplier_set)} 个唯一供应商。")
+        # 打印前5个看看样子，确保没读错
+        print(f"    示例数据: {list(supplier_set)[:5]}")
+
+        return supplier_set
+
+    except Exception as e:
+        print(f"!!! 读取 Excel 失败: {e}")
+        return set()
+
+
+class SupplierDBCache:
+    """
+    供应商目录缓存管理器
+    功能：检查 Excel 文件修改时间，决定是否从缓存读取还是重新解析
+    """
+    
+    def __init__(self, excel_path, cache_dir=None):
+        """
+        初始化缓存管理器
+        :param excel_path: Excel 文件路径
+        :param cache_dir: 缓存目录，默认与 Excel 同目录
+        """
+        self.excel_path = excel_path
+        
+        # 如果未指定缓存目录，使用 Excel 文件同目录
+        if cache_dir is None:
+            cache_dir = os.path.dirname(excel_path)
+        
+        # 生成缓存文件路径
+        excel_filename = os.path.splitext(os.path.basename(excel_path))[0]
+        self.cache_path = os.path.join(cache_dir, f"{excel_filename}_supplier_cache.json")
+        
+    def _get_file_mtime(self, file_path):
+        """获取文件修改时间"""
+        try:
+            return os.path.getmtime(file_path)
+        except OSError:
+            return 0
+            
+    def _is_cache_valid(self):
+        """检查缓存是否有效（缓存文件存在且比 Excel 新）"""
+        if not os.path.exists(self.cache_path):
+            return False
+            
+        excel_mtime = self._get_file_mtime(self.excel_path)
+        cache_mtime = self._get_file_mtime(self.cache_path)
+        
+        return cache_mtime > excel_mtime
+        
+    def _save_cache(self, supplier_set):
+        """保存缓存到 JSON 文件"""
+        try:
+            cache_data = {
+                'supplier_list': list(supplier_set),
+                'cache_time': time.time(),
+                'source_excel': self.excel_path
+            }
+            with open(self.cache_path, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+            print(f">>> 供应商缓存已保存: {os.path.basename(self.cache_path)}")
+            return True
+        except Exception as e:
+            print(f"!!! 保存供应商缓存失败: {e}")
+            return False
+            
+    def _load_cache(self):
+        """从缓存文件读取数据"""
+        try:
+            with open(self.cache_path, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            supplier_set = set(cache_data['supplier_list'])
+            print(f">>> 从缓存加载供应商目录: {len(supplier_set)} 个供应商")
+            return supplier_set
+        except Exception as e:
+            print(f"!!! 读取供应商缓存失败: {e}")
+            return None
+            
+    def get_supplier_db(self):
+        """
+        获取供应商目录（优先从缓存，缓存无效时从 Excel 重新加载）
+        :return: 包含所有供应商名称的 set 集合
+        """
+        # 检查缓存是否有效
+        if self._is_cache_valid():
+            print(f">>> 检测到有效供应商缓存，快速加载中...")
+            cached_data = self._load_cache()
+            if cached_data is not None:
+                return cached_data
+                
+        # 缓存无效，从 Excel 重新加载
+        print(f">>> 供应商缓存无效或不存在，从 Excel 重新加载...")
+        supplier_set = load_supplier_db_from_excel(self.excel_path)
+        
+        # 保存新的缓存
+        if supplier_set:
+            self._save_cache(supplier_set)
+            
+        return supplier_set
+
+
+def load_supplier_db_with_cache(file_path, cache_dir=None):
+    """
+    使用缓存机制加载供应商目录（推荐使用此函数替代 load_supplier_db_from_excel）
+    
+    :param file_path: Excel 文件路径
+    :param cache_dir: 缓存目录，默认与 Excel 同目录
+    :return: 包含所有供应商名称的 set 集合
+    """
+    cache_manager = SupplierDBCache(file_path, cache_dir)
+    return cache_manager.get_supplier_db()

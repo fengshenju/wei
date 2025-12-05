@@ -5,9 +5,37 @@ import os
 import sys
 import base64
 import mimetypes
+import requests
+
+try:
+    from google import genai
+    from google.genai import types
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    print("Warning: google-genai not installed. DMX image processing will not be available.")
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app_config import CONFIG
+
+
+def get_api_key(key_name, attempt=0):
+    """
+    获取API key，支持轮转重试
+    :param key_name: key配置名称，如 'llm_api_key' 或 'llm_image_api_key'
+    :param attempt: 重试次数，从0开始
+    :return: 对应的API key，如果没有配置则返回None
+    """
+    keys = CONFIG.get(key_name, [])
+    if not keys:
+        return None
+    
+    # 如果配置的是字符串（向后兼容），直接返回
+    if isinstance(keys, str):
+        return keys
+    
+    # 如果配置的是数组，循环使用
+    return keys[attempt % len(keys)]
 
 
 def encode_image_to_base64(image_path):
@@ -30,11 +58,12 @@ def encode_image_to_base64(image_path):
         return f"data:{mime_type};base64,{encoded_string}"
 
 
-def extract_data_from_image(image_path, prompt_instructions):
+def extract_data_from_image(image_path, prompt_instructions, attempt=0):
     """
     使用 Qwen-VL-Max 模型分析图片并提取数据
     :param image_path: 本地图片路径
     :param prompt_instructions: 指示模型提取什么数据的提示词
+    :param attempt: 重试次数，用于选择不同的API key
     :return: 解析后的 JSON 数据 (dict) 或 原始文本 (str)
     """
 
@@ -78,10 +107,8 @@ def extract_data_from_image(image_path, prompt_instructions):
             "max_tokens": 2000,  # 防止截断，视图片内容多少而定
         }
 
-        # 配置 API Key (优先读取配置，否则读取环境变量)
-        # 注意：如果是 Qwen，通常需要在环境变量设置 DASHSCOPE_API_KEY
-        # 或者在 litellm 调用时显式传入 api_key
-        api_key = CONFIG.get('llm_api_key')
+        # 配置 API Key (支持轮转重试)
+        api_key = get_api_key('llm_image_api_key', attempt)
         if api_key:
             request_params["api_key"] = api_key
 
@@ -103,12 +130,373 @@ def extract_data_from_image(image_path, prompt_instructions):
             result_json = json.loads(cleaned_content.strip())
             return result_json
         except json.JSONDecodeError:
-            print(">>> 警告: 模型返回的不是标准 JSON，返回原始文本")
+            print(">>> 警告: 模型返回的不是标准 JSON")
+            print(f">>> 原始返回内容: {content[:500]}...")
+            print(f">>> 清理后内容: {cleaned_content[:500]}...")
             return {"raw_text": content}
 
     except Exception as e:
         print(f">>> 图片分析失败: {e}")
         return {"error": str(e)}
+
+
+# 文件路径: utils/llm_utils.py
+# (请确保文件头部已经有 import json, os, sys, app_config 等引入，与之前保持一致)
+
+def call_llm_text(prompt_text, attempt=0):
+    model_name = "openai/qwen3-max"
+
+    print(f">>> 正在执行纯文本任务...")
+    print(f">>> 使用模型: {model_name}")
+
+    try:
+        # 1. 构造符合 OpenAI 标准的消息格式
+        # 纯文本任务 content 直接传字符串即可
+        # 保持一致性：强制追加 JSON 格式要求，防止模型废话
+        final_content = f"{prompt_text}\n\n请直接返回纯 JSON 格式的数据，不要包含 markdown 标记。"
+
+        messages = [
+            {
+                "role": "user",
+                "content": final_content
+            }
+        ]
+
+        # 2. 构造请求参数
+        request_params = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": 0.01,  # 逻辑匹配需要严谨，温度设极低
+            "max_tokens": 5000,  # 防止截断
+        }
+
+        # 配置 API Key (支持轮转重试)
+        api_key = get_api_key('llm_api_key', attempt)
+        if api_key:
+            request_params["api_key"] = api_key
+
+        request_params["base_url"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+        print(f">>> 发起 LLM 请求 (Text)...")
+        response = completion(**request_params)
+
+        content = response.choices[0].message.content.strip()
+
+        # 3. 数据清洗与 JSON 解析 (逻辑与 extract_data_from_image 完全一致)
+        cleaned_content = content
+        if cleaned_content.startswith("```json"):
+            cleaned_content = cleaned_content[7:]
+        elif cleaned_content.startswith("```"):  # 兼容部分模型只写 ``` 的情况
+            cleaned_content = cleaned_content[3:]
+
+        if cleaned_content.endswith("```"):
+            cleaned_content = cleaned_content[:-3]
+
+        try:
+            result_json = json.loads(cleaned_content.strip())
+            # 添加使用的API key信息
+            result_json['used_api_key'] = api_key if api_key else "N/A"
+            return result_json
+        except json.JSONDecodeError:
+            print(">>> 警告: 模型返回的不是标准 JSON")
+            print(f">>> 原始返回内容: {content[:500]}...")
+            print(f">>> 清理后内容: {cleaned_content[:500]}...")
+            return {"raw_text": content, "used_api_key": api_key if api_key else "N/A"}
+
+    except Exception as e:
+        print(f">>> 文本分析失败: {e}")
+        return {"error": str(e), "used_api_key": api_key if api_key else "N/A"}
+
+
+def call_gjllm_text(prompt_text, attempt=0):
+    model_name = "openai/Pro/deepseek-ai/DeepSeek-V3.1-Terminus"
+
+    print(f">>> 正在执行纯文本任务...")
+    print(f">>> 使用模型: {model_name}")
+
+    try:
+        # 1. 构造消息
+        final_content = f"{prompt_text}\n\n请直接返回纯 JSON 格式的数据，不要包含 markdown 标记。"
+        messages = [{"role": "user", "content": final_content}]
+
+        # 2. 获取 API Key (支持轮转重试)
+        api_key = get_api_key('gjllm_api_key', attempt)
+        if not api_key:
+            print("!!! 错误: 未配置 gjllm_api_key")
+            return {"status": "fail", "reason": "API Key缺失"}
+
+        # 3. 构造请求参数
+        # litellm.completion 的标准参数是 api_base 和 api_key
+        request_params = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": 0.01,
+            "max_tokens": 4000,
+            "api_key": api_key,
+            "api_base": "https://api.siliconflow.cn/v1",
+            # 可选: 显式指定不用缓存以测试连通性，正式用可去掉
+            "drop_params": True
+        }
+
+        print(f">>> 发起 LLM 请求 (Text)...")
+
+        # 4. 调用 litellm
+        response = completion(**request_params)
+
+        content = response.choices[0].message.content.strip()
+
+        # 5. 数据清洗
+        cleaned_content = content
+        if cleaned_content.startswith("```json"):
+            cleaned_content = cleaned_content[7:]
+        elif cleaned_content.startswith("```"):
+            cleaned_content = cleaned_content[3:]
+
+        if cleaned_content.endswith("```"):
+            cleaned_content = cleaned_content[:-3]
+
+        try:
+            result_json = json.loads(cleaned_content.strip())
+            # 添加使用的API key信息
+            result_json['used_api_key'] = api_key if api_key else "N/A"
+            return result_json
+        except json.JSONDecodeError:
+            print(f">>> 警告: 模型返回的不是标准 JSON:\n{content}")
+            return {"raw_text": content, "used_api_key": api_key if api_key else "N/A"}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f">>> 文本分析失败: {e}")
+        # 返回失败结构，防止主程序 RPA 崩溃
+        return {
+            "status": "fail",
+            "global_reason": f"LLM调用异常: {str(e)}",
+            "matched_record_ids": [],
+            "detail_analysis": [],
+            "used_api_key": api_key if api_key else "N/A"
+        }
+
+
+def call_dmxllm_text(prompt_text, attempt=0):
+    """
+    调用DMX大模型接口进行文本处理
+    :param prompt_text: 输入的提示词
+    :param attempt: 重试次数，用于选择不同的API key
+    :return: 解析后的 JSON 数据 (dict) 或 原始文本 (str)
+    """
+    print(f">>> 正在执行DMX文本任务...")
+    
+    try:
+        # 1. 获取配置信息
+        api_key = get_api_key('dmx_api_key', attempt)
+        api_url = CONFIG.get('dmx_api_url', 'https://www.dmxapi.cn/v1/chat/completions')
+        model = CONFIG.get('dmx_model', 'gemini-3-pro-preview')
+        
+        if not api_key:
+            print("!!! 错误: 未配置 dmx_api_key")
+            return {"status": "fail", "reason": "API Key缺失", "used_api_key": "N/A"}
+        
+        print(f">>> 使用模型: {model}")
+        
+        # 2. 构造请求数据
+        final_content = f"{prompt_text}\n\n请直接返回纯 JSON 格式的数据，不要包含 markdown 标记。"
+        
+        request_data = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user", 
+                    "content": final_content
+                }
+            ],
+            "stream": False
+        }
+        
+        # 3. 构造请求头
+        headers = {
+            "Accept": "application/json",
+            "Authorization": api_key,
+            "User-Agent": f"DMXAPI/1.0.0 ({api_url})",
+            "Content-Type": "application/json"
+        }
+        
+        # 4. 发起HTTP请求
+        url = f"{api_url}"
+        print(f">>> 发起 DMX 请求到: {url}")
+        
+        response = requests.post(
+            url, 
+            headers=headers,
+            json=request_data,
+            timeout=300  # 5分钟超时
+        )
+        
+        # 5. 处理响应
+        if response.status_code == 200:
+            response_data = response.json()
+            
+            # 提取生成的内容
+            if response_data.get('choices') and len(response_data['choices']) > 0:
+                content = response_data['choices'][0]['message']['content'].strip()
+                
+                # 数据清洗与 JSON 解析
+                cleaned_content = content
+                if cleaned_content.startswith("```json"):
+                    cleaned_content = cleaned_content[7:]
+                elif cleaned_content.startswith("```"):
+                    cleaned_content = cleaned_content[3:]
+                
+                if cleaned_content.endswith("```"):
+                    cleaned_content = cleaned_content[:-3]
+                
+                try:
+                    result_json = json.loads(cleaned_content.strip())
+                    # 添加使用的API key信息
+                    result_json['used_api_key'] = api_key if api_key else "N/A"
+                    return result_json
+                except json.JSONDecodeError:
+                    print(">>> 警告: DMX模型返回的不是标准 JSON")
+                    print(f">>> 原始返回内容: {content[:500]}...")
+                    print(f">>> 清理后内容: {cleaned_content[:500]}...")
+                    return {"raw_text": content, "used_api_key": api_key if api_key else "N/A"}
+            else:
+                print("!!! DMX响应中没有有效的choices数据")
+                return {"error": "无效的响应格式", "used_api_key": api_key if api_key else "N/A"}
+        else:
+            print(f"!!! DMX API调用失败，状态码：{response.status_code}")
+            print(f"!!! 响应内容：{response.text}")
+            return {"error": f"HTTP {response.status_code}: {response.text}", "used_api_key": api_key if api_key else "N/A"}
+            
+    except requests.exceptions.Timeout:
+        print("!!! DMX API调用超时")
+        return {"error": "请求超时", "used_api_key": api_key if api_key else "N/A"}
+    except requests.exceptions.RequestException as e:
+        print(f"!!! DMX API请求异常: {e}")
+        return {"error": f"请求异常: {str(e)}", "used_api_key": api_key if api_key else "N/A"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f">>> DMX文本分析失败: {e}")
+        # 返回失败结构，防止主程序 RPA 崩溃
+        return {
+            "status": "fail",
+            "global_reason": f"DMX LLM调用异常: {str(e)}",
+            "matched_record_ids": [],
+            "detail_analysis": [],
+            "used_api_key": api_key if api_key else "N/A"
+        }
+
+
+def extract_data_from_image_dmx(image_path, prompt_instructions, attempt=0):
+    """
+    使用 DMX Gemini 3 Pro 模型分析图片并提取数据
+    :param image_path: 本地图片路径
+    :param prompt_instructions: 指示模型提取什么数据的提示词
+    :param attempt: 重试次数，用于选择不同的API key
+    :return: 解析后的 JSON 数据 (dict) 或 原始文本 (str)
+    """
+    if not GENAI_AVAILABLE:
+        print("!!! 错误: google-genai 未安装，无法使用DMX图片识别")
+        return {"error": "google-genai library not available"}
+    
+    print(f">>> 正在处理图片: {os.path.basename(image_path)}")
+    print(">>> 使用DMX Gemini 3 Pro模型...")
+    
+    try:
+        # 1. 检查图片文件是否存在
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"图片文件不存在: {image_path}")
+        
+        # 2. 获取配置信息
+        api_key = get_api_key('dmx_image_api_key', attempt)
+        api_url = CONFIG.get('dmx_image_api_url', 'https://www.dmxapi.cn/v1/chat/completions')
+        model = CONFIG.get('dmx_image_model', 'gemini-pro-latest')
+        resolution = CONFIG.get('dmx_image_resolution', 'media_resolution_high')
+        
+        if not api_key:
+            print("!!! 错误: 未配置 dmx_image_api_key")
+            return {"error": "API Key缺失", "used_api_key": "N/A"}
+        
+        # 3. 读取图片数据
+        with open(image_path, "rb") as f:
+            image_data = f.read()
+        
+        # 4. 确定图片MIME类型
+        mime_type, _ = mimetypes.guess_type(image_path)
+        if not mime_type or not mime_type.startswith('image/'):
+            mime_type = 'image/jpeg'  # 默认回退
+        
+        print(f">>> 图片格式: {mime_type}")
+        print(f">>> 分辨率级别: {resolution}")
+        
+        # 5. 初始化客户端
+        client = genai.Client(
+            api_key=api_key,
+            http_options={'base_url': api_url}
+        )
+        
+        # 6. 构造请求
+        final_content = f"{prompt_instructions}\n\n请直接返回纯 JSON 格式的数据，不要包含 markdown 标记。"
+        
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                types.Content(
+                    parts=[
+                        types.Part(text=final_content),
+                        types.Part(
+                            inline_data=types.Blob(
+                                mime_type=mime_type,
+                                data=image_data
+                            ),
+                            media_resolution={"level": resolution}
+                        )
+                    ]
+                )
+            ]
+        )
+        
+        # 7. 处理响应
+        if hasattr(response, 'text') and response.text:
+            content = response.text.strip()
+            
+            # 数据清洗与 JSON 解析
+            cleaned_content = content
+            if cleaned_content.startswith("```json"):
+                cleaned_content = cleaned_content[7:]
+            elif cleaned_content.startswith("```"):
+                cleaned_content = cleaned_content[3:]
+            
+            if cleaned_content.endswith("```"):
+                cleaned_content = cleaned_content[:-3]
+            
+            try:
+                result_json = json.loads(cleaned_content.strip())
+                result_json['used_api_key'] = api_key if api_key else "N/A"
+                return result_json
+            except json.JSONDecodeError:
+                print(">>> 警告: DMX Gemini模型返回的不是标准 JSON")
+                print(f">>> 原始返回内容: {content[:500]}...")
+                print(f">>> 清理后内容: {cleaned_content[:500]}...")
+                return {"raw_text": content, "used_api_key": api_key if api_key else "N/A"}
+        else:
+            print("!!! DMX Gemini响应为空")
+            return {"error": "空响应", "used_api_key": api_key if api_key else "N/A"}
+            
+    except FileNotFoundError as e:
+        print(f">>> 文件错误: {e}")
+        return {"error": str(e), "used_api_key": "N/A"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f">>> DMX图片分析失败: {e}")
+        # 尝试获取api_key，如果获取失败则使用N/A
+        try:
+            key_info = api_key if 'api_key' in locals() and api_key else "N/A"
+        except:
+            key_info = "N/A"
+        return {"error": str(e), "used_api_key": key_info}
 
 
 # 测试代码
