@@ -20,7 +20,7 @@ from DrissionPage import Chromium, ChromiumOptions
 # ---------------------------------------------------------
 try:
     from app_config import CONFIG
-    from utils.data_manager import DataManager, load_style_db_with_cache
+    from utils.data_manager import DataManager, load_style_db_with_cache, load_supplier_db_with_cache
     from utils.report_generator import collect_result_data, update_html_report
     from utils.util_llm import extract_data_from_image, call_llm_text, call_gjllm_text, call_dmxllm_text, \
         extract_data_from_image_dmx
@@ -88,7 +88,6 @@ def handle_new_reconciliation_bill(tab):
     except Exception as e:
         print(f"!!! 新增对账单处理异常: {e}")
 
-# 跳转至“财务” -> “账单列表”
 # 跳转至“财务” -> “账单列表”
 def navigate_to_bill_list(tab, order_code):
     print("\n>>> [阶段: 跳转账单列表] 开始处理...")
@@ -644,70 +643,6 @@ def navigate_and_search_purchase_task(tab, order_code, parsed_data):
                     except Exception as e:
                         print(f"!!! 确认操作异常: {e}")
 
-                    # --- 动作 D: [新增] 执行采购任务 (修复：使用JS点击) ---
-                    print(">>> 准备执行采购任务...")
-                    time.sleep(1)
-
-                    try:
-                        # 定位并点击“更多”按钮
-                        more_btn = target_frame.ele(
-                            'x://button[contains(text(), "更多")]', timeout=2)
-
-                        if more_btn:
-                            # 【修复】使用 JS 点击，避免下拉动画期间点击失败
-                            more_btn.run_js('this.click()')
-                            time.sleep(0.5)  # 等待下拉菜单展开动画
-
-                            # 定位并点击“执行采购任务”
-                            exec_task_btn = target_frame.ele(
-                                'css:a[onclick="doMtPurTask()"]', timeout=1)
-
-                            if not exec_task_btn:
-                                exec_task_btn = target_frame.ele(
-                                    'x://a[contains(text(), "执行采购任务")]',
-                                    timeout=1)
-
-                            if exec_task_btn:
-                                print("   -> 找到“执行采购任务”按钮，正在点击...")
-                                # 【修复】使用 JS 点击，忽略位置大小计算
-                                exec_task_btn.run_js('this.click()')
-
-                                # 处理可能出现的 Alert/Confirm 弹窗
-                                try:
-                                    if tab.wait.alert(timeout=3):
-                                        alert_text = tab.alert.text
-                                        print(f"   ℹ️ 检测到系统弹窗: [{alert_text}]，自动接受...")
-                                        tab.alert.accept()
-                                except:
-                                    pass
-
-                                print("   ✅ 成功点击“执行采购任务”")
-                                time.sleep(2)  # 等待系统处理
-
-                                print(">>> 等待并处理结果弹窗...")
-                                try:
-                                    confirm_btn = tab.ele('css:a.layui-layer-btn0', timeout=3)
-                                    if not confirm_btn:
-                                        confirm_btn = target_frame.ele('css:a.layui-layer-btn0', timeout=2)
-
-                                    if confirm_btn:
-                                        confirm_btn.click()
-                                        print("   ✅ 成功点击弹窗“确定”按钮")
-                                        time.sleep(1)
-                                    else:
-                                        print("   ⚠️ 未检测到 Layui 结果弹窗 (可能已自动关闭或无需确认)")
-
-                                except Exception as e:
-                                    print(f"   !!! 处理结果弹窗时发生异常: {e}")
-                            else:
-                                print("   ⚠️ 展开了“更多”菜单，但未找到“执行采购任务”选项")
-                                more_btn.run_js('this.click()')  # 尝试关闭
-                        else:
-                            print("   ⚠️ 未找到“更多”按钮")
-
-                    except Exception as e:
-                        print(f"!!! 执行采购任务操作异常: {e}")
-
                 else:
                     print("!!! 错误: 丢失了 iframe 上下文")
 
@@ -873,6 +808,85 @@ def smart_clean_with_db(text, style_db):
 
 
 # 根据规则确定最终款号
+def normalize_supplier_name(extracted_name, supplier_db):
+    """
+    供应商名称标准化匹配（优化版：增强短词匹配和包含逻辑）
+    """
+    if not extracted_name or not supplier_db:
+        return None
+
+    extracted_name = str(extracted_name).strip()
+    # 去除常见的无关后缀，提高纯净度（可根据实际情况添加）
+    clean_extracted = extracted_name.replace("商行", "").replace("有限公司", "").replace("布行", "").strip()
+
+    if not extracted_name:
+        return None
+
+    # 1. 精确匹配 (最快)
+    if extracted_name in supplier_db:
+        print(f"   [匹配] 精确命中: {extracted_name}")
+        return extracted_name
+
+    # 2. 核心包含逻辑 (解决 "罗卡" vs "罗卡家")
+    # 遍历库里的标准名
+    for db_name in supplier_db:
+        # A. 库里的名字包含提取的名字 (如 库:"杭州罗卡", 提:"罗卡")
+        if extracted_name in db_name:
+            print(f"   [匹配] 包含命中(提取在库中): {extracted_name} -> {db_name}")
+            return db_name
+
+        # B. 提取的名字包含库里的名字 (如 库:"罗卡", 提:"罗卡家" / "罗卡纺织")
+        # ⚠️关键：防止由"罗"匹配到"罗卡"，限制标准名长度至少为2
+        if len(db_name) >= 2 and db_name in extracted_name:
+            print(f"   [匹配] 包含命中(库在提取中): {extracted_name} -> {db_name}")
+            return db_name
+
+        # C. 针对清洗后的包含 (如 库:"罗卡", 提:"罗卡商行"->clean:"罗卡")
+        if len(db_name) >= 2 and db_name == clean_extracted:
+            print(f"   [匹配] 清洗后命中: {extracted_name} -> {db_name}")
+            return db_name
+
+    # 3. 编辑距离匹配 (容错)
+    def levenshtein_distance(s1, s2):
+        if len(s1) < len(s2):
+            return levenshtein_distance(s2, s1)
+        if len(s2) == 0:
+            return len(s1)
+        previous_row = list(range(len(s2) + 1))
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+        return previous_row[-1]
+
+    best_match = None
+    min_distance = float('inf')
+
+    for standard_name in supplier_db:
+        dist = levenshtein_distance(extracted_name, standard_name)
+
+        # 动态阈值计算
+        # 如果标准名很短(<=3)，允许1个字符差异
+        # 如果标准名较长，允许 40% 的差异
+        length = max(len(extracted_name), len(standard_name))
+        if length <= 3:
+            threshold = 1.0  # 允许错1个字
+        else:
+            threshold = length * 0.4
+
+        if dist <= threshold and dist < min_distance:
+            min_distance = dist
+            best_match = standard_name
+
+    if best_match:
+        print(f"   [匹配] 模糊命中(距离{min_distance}): {extracted_name} -> {best_match}")
+
+    return best_match
+
 def determine_final_style(json_data, style_db):
     """
     根据业务规则从 candidates 中选出最终款号
@@ -995,7 +1009,7 @@ def process_single_bill_rpa(browser, data_json, file_name, img_path):
         search_input = None
 
         # 循环尝试 10 次 (共等待 5 秒)，防止 iframe 还没加载完
-        for _ in range(10):
+        for _ in range(20):
             # 遍历所有 iframe
             for frame in tab.eles('tag:iframe'):
 
@@ -1065,7 +1079,10 @@ def process_single_bill_rpa(browser, data_json, file_name, img_path):
 
                 # --- 在这里处理你拿到的 JSON 数据 ---
                 if isinstance(response_body, dict):
-                    records = response_body.get('data', [])
+                    # 修复：先获取值，如果是 None (即接口返回 null)，则强制转换为空列表
+                    records = response_body.get('data')
+                    if records is None:
+                        records = []
                     print(f"数据统计: 共找到 {len(records)} 条记录")
 
                     if not records:
@@ -1166,7 +1183,59 @@ def process_single_bill_rpa(browser, data_json, file_name, img_path):
                                         continue
 
                                 if not type_selected:
-                                    print("⚠️ 未能完成“月结采购”选择 (可能已默认选中或元素定位失败)")
+                                    print("⚠️ 未能完成月结采购选择 (可能已默认选中或元素定位失败)")
+
+                                # 选择供应商
+                                supplier_name = data_json.get('supplier_name', '').strip()
+                                if supplier_name:
+                                    print(f">>> 正在设置供应商: {supplier_name}")
+                                    supplier_selected = False
+                                    
+                                    for scope in current_scopes:
+                                        try:
+                                            # 1. 点击供应商标签弹出选择框
+                                            supplier_label = scope.ele('#lbSupplierInfo', timeout=0.5)
+                                            if supplier_label and supplier_label.states.is_displayed:
+                                                supplier_label.click()
+                                                time.sleep(0.5)
+                                                
+                                                # 2. 定位搜索框
+                                                search_box = scope.ele('#txtMpSupplierPlusContent', timeout=1)
+                                                
+                                                if search_box and search_box.states.is_displayed:
+                                                    # 3. 输入供应商名称并回车
+                                                    search_box.clear()
+                                                    search_box.input(supplier_name)
+                                                    time.sleep(0.2)
+                                                    scope.actions.key_down('ENTER').key_up('ENTER')
+                                                    time.sleep(0.5)
+                                                    
+                                                    # 4. 在结果表格中找到完全匹配的供应商行并双击
+                                                    target_td_xpath = f'x://table[@id="mtSupplierPlusGrid"]//tbody//tr//td[text()="{supplier_name}"]'
+                                                    target_td = scope.ele(target_td_xpath, timeout=1)
+                                                    
+                                                    if target_td:
+                                                        print(f"  -> 找到供应商 [{supplier_name}]，执行双击选择...")
+                                                        js_code = """
+                                                            this.click(); 
+                                                            this.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true, view: window}));
+                                                        """
+                                                        target_td.run_js(js_code)
+                                                        time.sleep(0.5)
+                                                        supplier_selected = True
+                                                        break
+                                                    else:
+                                                        print(f"  ⚠️ 供应商列表中未搜索到: {supplier_name}")
+                                                        supplier_label.click()
+                                                else:
+                                                    print("  ⚠️ 供应商选择弹窗未出现")
+                                        except Exception:
+                                            continue
+                                    
+                                    if not supplier_selected:
+                                        print(f"⚠️ 未能完成供应商选择: {supplier_name}")
+                                else:
+                                    print("⚠️ 未获取到供应商名称")
 
                                 # 根据款号选择品牌
                                 style_code = data_json.get('final_selected_style', '').strip().upper()  # 获取款号，转大写并去空格
@@ -1626,26 +1695,19 @@ def process_single_bill_rpa(browser, data_json, file_name, img_path):
                                                                                 print("✅ 成功点击弹窗“确定”按钮")
                                                                                 time.sleep(1)  # 等待弹窗关闭动画
 
-                                                                                # 调用外部独立函数
-                                                                                navigate_and_search_purchase_task(tab,
-                                                                                                                  data_json.get(
-                                                                                                                      'rpa_order_code'),
-                                                                                                                  data_json)
+                                                                                # 执行采购任务后续操作
+                                                                                navigate_and_search_purchase_task(tab,data_json.get('rpa_order_code'),data_json)
 
-                                                                                navigate_to_bill_list(tab,
-                                                                                                      data_json.get(
-                                                                                                          'rpa_order_code'))
+                                                                                navigate_to_bill_list(tab,data_json.get('rpa_order_code'))
                                                                             else:
-                                                                                print(
-                                                                                    "⚠️ 未检测到 Layui 结果弹窗 (可能已自动关闭或无需确认)")
+                                                                                print("⚠️ 未检测到 Layui 结果弹窗 (可能已自动关闭或无需确认)")
 
                                                                         except Exception as e:
                                                                             print(f"!!! 处理结果弹窗时发生异常: {e}")
                                                                     else:
-                                                                        print(
-                                                                            "⚠️ 展开了“更多”菜单，但未找到“执行采购任务”选项")
+                                                                        print("⚠️ 展开了“更多”菜单，但未找到“执行采购任务”选项")
                                                                     # 尝试关闭下拉菜单，避免遮挡
-                                                                    more_btn.click()
+                                                                    # more_btn.click()
                                                                 else:
                                                                     print("⚠️ 未找到“更多”按钮")
 
@@ -1655,8 +1717,11 @@ def process_single_bill_rpa(browser, data_json, file_name, img_path):
                                                         print(
                                                             "⚠️ 搜索请求发送了，但未捕获到预期的网络响应 (可能是接口规则不同)")
 
-                                                    tab.listen.stop()
-
+                                                    try:
+                                                        if tab.listen:
+                                                            tab.listen.stop()
+                                                    except Exception:
+                                                        pass
                                                     # 截图留存证据 (可选)
                                                     # tab.get_screenshot(path=os.path.join(CONFIG.get('data_storage_path'), f"{file_name}_final.jpg"))
 
@@ -1681,15 +1746,37 @@ def process_single_bill_rpa(browser, data_json, file_name, img_path):
                 print(f"!!! 警告: 等待 {10} 秒后未捕获到 URL 包含 '{target_url_substring}' 的请求。")
 
             # 停止监听 (虽然 wait 抓到一个后通常不需要手动停，但为了保险可以重置)
-            tab.listen.stop()
+            try:
+                if tab.listen:
+                    tab.listen.stop()
+            except Exception:
+                pass
 
 
         else:
             print("!!! 错误：没找到可见的搜索框，请检查页面是否加载完成。")
 
     except Exception as e:
-        print(f"!!! rpa执行过程中发生异常: {e}")
+        error_msg = f"RPA执行异常: {str(e)}"
+        print(f"!!! {error_msg}")
+
+        # 【关键修复】构造一个假的 match_result 包含错误信息
+        # 这样 report_generator 就能读到 failure_reason
+        if match_result is None:
+            match_result = {
+                "status": "fail",
+                "reason": error_msg,
+                "global_reason": error_msg
+            }
+        else:
+            match_result['reason'] = f"{match_result.get('reason', '')} | {error_msg}"
     finally:
+        # 在 finally 中确保监听停止（非必要，但为了双重保险）
+        try:
+            if tab and tab.listen:
+                tab.listen.stop()
+        except Exception:
+            pass
         # 关闭页签
         if tab:
             try:
@@ -1701,7 +1788,7 @@ def process_single_bill_rpa(browser, data_json, file_name, img_path):
     return match_prompt, match_result, original_records, retry_count
 
 
-def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB):
+def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB):
     """解析单张图片"""
     file_name = os.path.basename(img_path)
 
@@ -1713,11 +1800,18 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB):
 
         print(f"[处理中] 正在解析: {file_name} ...")
 
-        # 根据配置决定是否使用LLM解析图片
+        supplier_list_str = "、".join(LOCAL_SUPPLIER_DB) if LOCAL_SUPPLIER_DB else "无已知供应商，请自行识别"
+
+        try:
+            current_prompt = PROMPT_INSTRUCTION.format(known_suppliers=supplier_list_str)
+        except KeyError as e:
+            current_prompt = PROMPT_INSTRUCTION.replace("{known_suppliers}", supplier_list_str)
+
+        # 1. 首次解析
         if CONFIG.get('use_llm_image_parsing', True):
-            parsed_data = extract_data_from_image(img_path, PROMPT_INSTRUCTION)
-            # parsed_data = extract_data_from_image_dmx(img_path, PROMPT_INSTRUCTION)
+            parsed_data = extract_data_from_image(img_path, current_prompt)
         else:
+            # 测试桩数据
             parsed_data = {
                 'buyer_name': '素本服饰',
                 'delivery_date': '2025-11-22',
@@ -1728,27 +1822,94 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB):
             }
 
         final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
-
         parsed_data['final_selected_style'] = final_style
-        print(f"最终判定款号: {final_style}")
 
-        # 检查交付日期异常，如果异常则用DMX重新识别
+        # 2. 供应商匹配与重试逻辑 (核心修改区域)
+        # -------------------------------------------------------------------------
+        supplier_name = normalize_supplier_name(parsed_data.get('supplier_name'), LOCAL_SUPPLIER_DB)
+
+        if supplier_name:
+            # 首次匹配成功
+            parsed_data['supplier_name'] = supplier_name
+            print(f"匹配供应商: {supplier_name}")
+        else:
+            # 首次匹配失败 -> 尝试 DMX 重试
+            print(f"!!! 首次供应商匹配失败: [{parsed_data.get('supplier_name')}]，正在使用 DMX 进行重试识别...")
+
+            # 调用 DMX 接口 (retry_count=0)
+            dmx_parsed_data = extract_data_from_image_dmx(img_path, current_prompt, 0)
+
+            dmx_success = False
+            if dmx_parsed_data and 'error' not in dmx_parsed_data:
+                # DMX 识别成功，再次尝试匹配供应商
+                retry_supplier_name = normalize_supplier_name(dmx_parsed_data.get('supplier_name'), LOCAL_SUPPLIER_DB)
+
+                if retry_supplier_name:
+                    print(f"✅ DMX 重试挽回成功! 匹配到供应商: {retry_supplier_name}")
+
+                    # 用 DMX 的高质量数据替换原始数据
+                    parsed_data = dmx_parsed_data
+                    parsed_data['supplier_name'] = retry_supplier_name
+
+                    # ⚠️ 数据变了，重新判定一下款号，防止漏掉
+                    final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
+                    parsed_data['final_selected_style'] = final_style
+                    print(f"   -> DMX重试后的款号判定: {final_style}")
+
+                    dmx_success = True
+                else:
+                    print(f"!!! DMX 重试后供应商依然无法匹配: [{dmx_parsed_data.get('supplier_name')}]")
+            else:
+                print("!!! DMX 接口调用失败或未返回有效数据")
+
+            # 如果 DMX 也没救回来，才返回失败
+            if not dmx_success:
+                return {
+                    'error': '供应商匹配失败',
+                    'file_name': file_name,
+                    'img_path': img_path,
+                    'original_supplier': parsed_data.get('supplier_name'),
+                    'failure_reason': '供应商匹配失败(含DMX重试)',
+                    'parsed_data': parsed_data,
+                    'final_style': parsed_data.get('final_selected_style', '')
+                }
+        # -------------------------------------------------------------------------
+
+        # 3. 检查交付日期异常 (原有逻辑保持不变)
+        # 注意：如果上面 DMX 已经替换了 parsed_data，这里检查的就是新数据的日期，逻辑是通顺的
         delivery_date = parsed_data.get('delivery_date', '')
         if delivery_date and should_use_dmx_for_date_check(delivery_date):
-            print(f">>> 交付日期异常: {delivery_date}，使用DMX重新识别...")
-            dmx_parsed_data = extract_data_from_image_dmx(img_path, PROMPT_INSTRUCTION, 0)
-            if dmx_parsed_data and 'error' not in dmx_parsed_data:
-                print(">>> DMX重新识别成功，替换原始数据")
-                parsed_data = dmx_parsed_data
-                final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
-                parsed_data['final_selected_style'] = final_style
-                parsed_data['used_dmx_for_date_check'] = True  # 标记使用了DMX重新识别
-                print(f">>> DMX识别后的款号: {final_style}")
+            # 只有当还没有使用过 DMX 时才再次调用 (避免重复计费/耗时)
+            # 我们可以通过检查 parsed_data 是否有特定标记来判断，或者直接根据日期逻辑走
+            # 这里简单起见，如果日期异常，即使刚才为了供应商调用过，这里可能还是要处理(虽然概率低)
+            # 优化：通常 DMX 的日期也是准的，所以如果上面已经替换过 parsed_data，这里的日期大概率是准的。
+
+            print(f">>> 交付日期异常: {delivery_date}，使用DMX重新校验...")
+            # 再次调用 DMX (如果是为了日期)
+            dmx_date_data = extract_data_from_image_dmx(img_path, current_prompt, 0)
+
+            if dmx_date_data and 'error' not in dmx_date_data:
+                print(">>> DMX日期校验返回成功，更新数据")
+                # 这里比较微妙，如果为了日期更新了数据，供应商名字可能会变回去(变成未标准化的)
+                # 所以要重新走一遍供应商匹配，或者只更新日期字段。
+                # 稳妥起见，替换数据后重新匹配供应商
+
+                temp_supplier = normalize_supplier_name(dmx_date_data.get('supplier_name'), LOCAL_SUPPLIER_DB)
+                if temp_supplier:
+                    parsed_data = dmx_date_data
+                    parsed_data['supplier_name'] = temp_supplier
+                    final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
+                    parsed_data['final_selected_style'] = final_style
+                    parsed_data['used_dmx_for_date_check'] = True
+                    print(f"   -> DMX日期修正后供应商: {temp_supplier}")
+                else:
+                    print("   ⚠️ DMX日期校验数据的供应商无法匹配，仅更新日期字段")
+                    parsed_data['delivery_date'] = dmx_date_data.get('delivery_date')
             else:
-                print(">>> DMX重新识别失败，继续使用原始数据")
+                print(">>> DMX日期校验失败，保留原数据")
                 parsed_data['dmx_recheck_failed'] = True
 
-        # 重试识别逻辑
+        # 4. 款号重试识别逻辑 (原有逻辑保持不变)
         valid_prefixes = tuple(CONFIG.get('valid_style_prefixes', ['T', 'H', 'X', 'D']))
         max_retries = CONFIG.get('image_recognition_max_retries', 3)
         retry_count = 1
@@ -1761,27 +1922,34 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB):
                 print(f">>> 识别的款号{final_style}不符合规律，开始重试识别...")
 
             for retry_attempt in range(1, max_retries + 1):
-                print(f">>> 第{retry_attempt}次重试...")
-                # retry_parsed_data = extract_data_from_image(img_path, PROMPT_INSTRUCTION)
-                retry_parsed_data = extract_data_from_image_dmx(img_path, PROMPT_INSTRUCTION)
+                print(f">>> 第{retry_attempt}次重试(款号)...")
+                # 使用 DMX 重试
+                retry_parsed_data = extract_data_from_image_dmx(img_path, current_prompt)
                 retry_count = retry_attempt + 1
 
                 if retry_parsed_data and 'error' not in retry_parsed_data:
                     retry_final_style = determine_final_style(retry_parsed_data, LOCAL_STYLE_DB)
                     if retry_final_style and retry_final_style.upper().startswith(valid_prefixes):
-                        print(f">>> 重试成功: {retry_final_style}")
-                        parsed_data = retry_parsed_data
-                        final_style = retry_final_style
-                        parsed_data['final_selected_style'] = final_style
-                        failure_reason = None
-                        break
+                        # 重试成功，还需要检查供应商匹配
+                        s_name = normalize_supplier_name(retry_parsed_data.get('supplier_name'), LOCAL_SUPPLIER_DB)
+                        if s_name:
+                            print(f">>> 款号重试成功: {retry_final_style}, 供应商: {s_name}")
+                            parsed_data = retry_parsed_data
+                            final_style = retry_final_style
+                            parsed_data['final_selected_style'] = final_style
+                            parsed_data['supplier_name'] = s_name
+                            failure_reason = None
+                            break
+                        else:
+                            print(f">>> 重试款号成功但供应商匹配失败，继续重试...")
+                            continue
                 else:
                     print(f">>> 第{retry_attempt}次重试识别失败")
             else:
                 failure_reason = "款号没有解析到"
                 print(f">>> 所有重试均失败，{failure_reason}")
 
-        # 如果最终仍然没有有效款号，直接返回失败结果，不进入RPA逻辑
+        # 5. 最终检查
         if not final_style or not final_style.upper().startswith(valid_prefixes):
             print(f"!!! 款号解析最终失败: {file_name}, 款号: {final_style or 'None'}")
             return {
@@ -1798,21 +1966,7 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB):
         if failure_reason:
             parsed_data['failure_reason'] = failure_reason
 
-        # 错误检查
-        if not parsed_data or 'error' in parsed_data:
-            error_msg = parsed_data.get('error', '未知') if parsed_data else '解析结果为空'
-            print(f"!!! 解析失败，跳过: {file_name}, 原因: {error_msg}")
-            return {
-                'file_name': file_name,
-                'img_path': img_path,
-                'success': False,
-                'error': error_msg,
-                'parsed_data': parsed_data,
-                'final_style': None,
-                'failure_reason': parsed_data.get('failure_reason', error_msg) if parsed_data else error_msg
-            }
-
-        # 数据持久化
+        # 6. 数据持久化
         saved = db_manager.save_data(file_name, parsed_data)
         if not saved:
             print("!!! 数据保存失败，中断处理本条")
@@ -1847,14 +2001,13 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB):
             'failure_reason': str(e)
         }
 
-
 def process_complete_rpa(browser, result):
     """处理完整的RPA+LLM匹配流程并收集报告数据"""
     try:
         if result['success']:
-            file_name = result['file_name']
-            parsed_data = result['parsed_data']
-            img_path = result['img_path']
+            file_name = result.get('file_name', '')
+            parsed_data = result.get('parsed_data', {})
+            img_path = result.get('img_path', '')
 
             # 执行完整RPA+LLM流程
             match_prompt, match_result, original_records, retry_count = process_single_bill_rpa(browser, parsed_data,
@@ -1864,37 +2017,37 @@ def process_complete_rpa(browser, result):
             return collect_result_data(
                 image_name=file_name,
                 parsed_data=parsed_data,
-                final_style=result['final_style'],
+                final_style=result.get('final_style', ''),
                 match_prompt=match_prompt,
                 match_result=match_result,
                 original_records=original_records,
-                image_path=result['img_path'],
+                image_path=result.get('img_path', ''),
                 retry_count=retry_count,
                 failure_reason=result.get('failure_reason', '')
             )
         else:
             # 解析失败，生成失败报告
             return collect_result_data(
-                image_name=result['file_name'],
+                image_name=result.get('file_name', ''),
                 parsed_data=result.get('parsed_data', {}),
                 final_style=result.get('final_style', ''),
                 match_prompt="",
                 match_result=None,
                 original_records=[],
-                image_path=result['img_path'],
+                image_path=result.get('img_path', ''),
                 retry_count=1,
                 failure_reason=result.get('failure_reason', '')
             )
     except Exception as e:
-        print(f"!!! 完整流程异常: {result['file_name']}, 错误: {e}")
+        print(f"!!! 完整流程异常: {result.get('file_name', '')}, 错误: {e}")
         return collect_result_data(
-            image_name=result['file_name'],
+            image_name=result.get('file_name', ''),
             parsed_data=result.get('parsed_data', {}),
             final_style=result.get('final_style', ''),
             match_prompt="",
             match_result=None,
             original_records=[],
-            image_path=result['img_path'],
+            image_path=result.get('img_path', ''),
             retry_count=1,
             failure_reason=str(e)
         )
@@ -1905,6 +2058,11 @@ async def async_main():
     excel_path = CONFIG.get('style_db_path')
     col_name = CONFIG.get('style_db_column', '款式编号')
     LOCAL_STYLE_DB = load_style_db_with_cache(excel_path, col_name)
+    
+    # 1.1 加载月结供应商目录 (Excel + 缓存加速)
+    supplier_excel_path = CONFIG.get('supplier_db_path')
+    LOCAL_SUPPLIER_DB = load_supplier_db_with_cache(supplier_excel_path) if supplier_excel_path else set()
+    print(f">>> 月结供应商目录加载完成，共 {len(LOCAL_SUPPLIER_DB)} 个供应商")
 
     # 2. 初始化数据管理器
     storage_path = CONFIG.get('data_storage_path')
@@ -1942,7 +2100,7 @@ async def async_main():
         async with semaphore:
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as executor:
-                return await loop.run_in_executor(executor, parse_single_image, img_path, db_manager, LOCAL_STYLE_DB)
+                return await loop.run_in_executor(executor, parse_single_image, img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB)
 
     parse_tasks = [parse_with_semaphore(img_path) for img_path in image_files]
     parse_results = await asyncio.gather(*parse_tasks, return_exceptions=True)
@@ -1976,15 +2134,15 @@ async def async_main():
     failed_report_results = []
     for failed_result in failed_results:
         report_data = collect_result_data(
-            image_name=failed_result['file_name'],
+            image_name=failed_result.get('file_name', ''),
             parsed_data=failed_result.get('parsed_data', {}),
             final_style=failed_result.get('final_style', ''),
             match_prompt="",
             match_result=None,
             original_records=[],
-            image_path=failed_result['img_path'],
+            image_path=failed_result.get('img_path', ''),
             retry_count=failed_result.get('parsed_data', {}).get('retry_count', 1),
-            failure_reason=failed_result.get('failure_reason', '款号没有解析到')
+            failure_reason=failed_result.get('failure_reason') or failed_result.get('error', '款号没有解析到')
         )
         failed_report_results.append(report_data)
 

@@ -390,114 +390,105 @@ def call_dmxllm_text(prompt_text, attempt=0):
 
 def extract_data_from_image_dmx(image_path, prompt_instructions, attempt=0):
     """
-    使用 DMX Gemini 3 Pro 模型分析图片并提取数据
-    :param image_path: 本地图片路径
-    :param prompt_instructions: 指示模型提取什么数据的提示词
-    :param attempt: 重试次数，用于选择不同的API key
-    :return: 解析后的 JSON 数据 (dict) 或 原始文本 (str)
+    使用 DMX 接口 (OpenAI 兼容协议) 分析图片并提取数据
+    完全仿照 DMX 文档的 Base64 写法，使用 requests 库直接请求
     """
-    if not GENAI_AVAILABLE:
-        print("!!! 错误: google-genai 未安装，无法使用DMX图片识别")
-        return {"error": "google-genai library not available"}
-    
     print(f">>> 正在处理图片: {os.path.basename(image_path)}")
-    print(">>> 使用DMX Gemini 3 Pro模型...")
-    
+    print(">>> 使用DMX Gemini模型 (Requests方式)...")
+
     try:
         # 1. 检查图片文件是否存在
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"图片文件不存在: {image_path}")
-        
+
         # 2. 获取配置信息
         api_key = get_api_key('dmx_image_api_key', attempt)
+        # 注意：DMX 图片通常走 /v1/chat/completions
         api_url = CONFIG.get('dmx_image_api_url', 'https://www.dmxapi.cn/v1/chat/completions')
-        model = CONFIG.get('dmx_image_model', 'gemini-pro-latest')
-        resolution = CONFIG.get('dmx_image_resolution', 'media_resolution_high')
-        
+        model = CONFIG.get('dmx_image_model', 'gemini-1.5-pro')  # 建议确认 DMX 支持的模型名称
+
         if not api_key:
             print("!!! 错误: 未配置 dmx_image_api_key")
             return {"error": "API Key缺失", "used_api_key": "N/A"}
-        
-        # 3. 读取图片数据
-        with open(image_path, "rb") as f:
-            image_data = f.read()
-        
-        # 4. 确定图片MIME类型
-        mime_type, _ = mimetypes.guess_type(image_path)
-        if not mime_type or not mime_type.startswith('image/'):
-            mime_type = 'image/jpeg'  # 默认回退
-        
-        print(f">>> 图片格式: {mime_type}")
-        print(f">>> 分辨率级别: {resolution}")
-        
-        # 5. 初始化客户端
-        client = genai.Client(
-            api_key=api_key,
-            http_options={'base_url': api_url}
-        )
-        
-        # 6. 构造请求
+
+        # 3. 图片转 Base64 (复用你已有的函数)
+        # 注意：encode_image_to_base64 返回的是 "data:image/jpeg;base64,xxxx" 格式
+        # DMX/OpenAI 格式通常只需要在这个 URL 字段里填这个字符串即可
+        base64_image_url = encode_image_to_base64(image_path)
+
+        # 4. 构造请求头
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        # 5. 构造请求体 (OpenAI Vision 标准格式)
         final_content = f"{prompt_instructions}\n\n请直接返回纯 JSON 格式的数据，不要包含 markdown 标记。"
-        
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                types.Content(
-                    parts=[
-                        types.Part(text=final_content),
-                        types.Part(
-                            inline_data=types.Blob(
-                                mime_type=mime_type,
-                                data=image_data
-                            ),
-                            media_resolution={"level": resolution}
-                        )
+
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": final_content
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": base64_image_url
+                            }
+                        }
                     ]
-                )
-            ]
-        )
-        
+                }
+            ],
+            "max_tokens": 4000,
+            "stream": False
+        }
+
+        print(f">>> 发起请求到: {api_url}")
+        print(f">>> 模型: {model}")
+
+        # 6. 发起 HTTP POST 请求
+        response = requests.post(api_url, headers=headers, json=payload, timeout=120)
+
         # 7. 处理响应
-        if hasattr(response, 'text') and response.text:
-            content = response.text.strip()
-            
-            # 数据清洗与 JSON 解析
-            cleaned_content = content
-            if cleaned_content.startswith("```json"):
-                cleaned_content = cleaned_content[7:]
-            elif cleaned_content.startswith("```"):
-                cleaned_content = cleaned_content[3:]
-            
-            if cleaned_content.endswith("```"):
-                cleaned_content = cleaned_content[:-3]
-            
-            try:
-                result_json = json.loads(cleaned_content.strip())
-                result_json['used_api_key'] = api_key if api_key else "N/A"
-                return result_json
-            except json.JSONDecodeError:
-                print(">>> 警告: DMX Gemini模型返回的不是标准 JSON")
-                print(f">>> 原始返回内容: {content[:500]}...")
-                print(f">>> 清理后内容: {cleaned_content[:500]}...")
-                return {"raw_text": content, "used_api_key": api_key if api_key else "N/A"}
+        if response.status_code == 200:
+            res_json = response.json()
+            if "choices" in res_json and len(res_json["choices"]) > 0:
+                content = res_json["choices"][0]["message"]["content"].strip()
+
+                # 数据清洗
+                cleaned_content = content
+                if cleaned_content.startswith("```json"):
+                    cleaned_content = cleaned_content[7:]
+                elif cleaned_content.startswith("```"):
+                    cleaned_content = cleaned_content[3:]
+                if cleaned_content.endswith("```"):
+                    cleaned_content = cleaned_content[:-3]
+
+                try:
+                    result_json = json.loads(cleaned_content.strip())
+                    result_json['used_api_key'] = api_key if api_key else "N/A"
+                    return result_json
+                except json.JSONDecodeError:
+                    print(">>> 警告: DMX 返回内容无法解析为JSON")
+                    return {"raw_text": content, "used_api_key": api_key}
+            else:
+                print(f"!!! DMX 返回结构异常: {res_json}")
+                return {"error": "Invalid response structure", "used_api_key": api_key}
         else:
-            print("!!! DMX Gemini响应为空")
-            return {"error": "空响应", "used_api_key": api_key if api_key else "N/A"}
-            
-    except FileNotFoundError as e:
-        print(f">>> 文件错误: {e}")
-        return {"error": str(e), "used_api_key": "N/A"}
+            print(f"!!! DMX 请求失败: {response.status_code}")
+            print(f"!!! 错误详情: {response.text}")
+            return {"error": f"HTTP {response.status_code}: {response.text}", "used_api_key": api_key}
+
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f">>> DMX图片分析失败: {e}")
-        # 尝试获取api_key，如果获取失败则使用N/A
-        try:
-            key_info = api_key if 'api_key' in locals() and api_key else "N/A"
-        except:
-            key_info = "N/A"
-        return {"error": str(e), "used_api_key": key_info}
-
+        print(f">>> DMX图片分析系统错误: {e}")
+        return {"error": str(e), "used_api_key": api_key if 'api_key' in locals() else "N/A"}
 
 # 测试代码
 if __name__ == "__main__":
