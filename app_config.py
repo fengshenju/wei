@@ -6,16 +6,17 @@
 CONFIG = {
 
     # LLM 配置
-    # "llm_image_api_key":"sk-4812e140381a4e329b6d64baf14bca88",    # 微微的阿里API Key
-    # "sk-650aa3e14159421bbbbbf2e2f285dfc5",  # 杨青的阿里API Key
+    # "llm_image_api_key":"sk-81df8063219a4b398af8ea707e293034",    # 微微的阿里API Key
     # "llm_api_key":"sk-81df8063219a4b398af8ea707e293034",
 
      "llm_image_api_key": [
          "sk-a58eda60805e41999596ef92fb385480"   # 微妈的阿里API Key
+        "sk-81df8063219a4b398af8ea707e293034" # 微微的阿里API Key
      ],
 
      "llm_api_key": [
          "sk-a58eda60805e41999596ef92fb385480"   # 微妈的阿里API Key
+        "sk-81df8063219a4b398af8ea707e293034" # 微微的阿里API Key
      ],
 
     # "llm_image_api_key": "sk-a58eda60805e41999596ef92fb385480",  # 微妈的阿里API Key
