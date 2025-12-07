@@ -10,13 +10,13 @@ CONFIG = {
     # "llm_api_key":"sk-81df8063219a4b398af8ea707e293034",
 
      "llm_image_api_key": [
-         "sk-a58eda60805e41999596ef92fb385480"   # 微妈的阿里API Key
+         "sk-a58eda60805e41999596ef92fb385480",   # 微妈的阿里API Key
         "sk-81df8063219a4b398af8ea707e293034" # 微微的阿里API Key
      ],
 
      "llm_api_key": [
-         "sk-a58eda60805e41999596ef92fb385480"   # 微妈的阿里API Key
-        "sk-81df8063219a4b398af8ea707e293034" # 微微的阿里API Key
+         "sk-a58eda60805e41999596ef92fb385480",  # 微妈的阿里API Key
+         "sk-81df8063219a4b398af8ea707e293034"   # 微微的阿里API Key
      ],
 
     # "llm_image_api_key": "sk-a58eda60805e41999596ef92fb385480",  # 微妈的阿里API Key
@@ -53,7 +53,7 @@ CONFIG = {
     "valid_style_prefixes": ['T', 'H', 'X', 'D'],  # 有效的款号前缀
     "image_recognition_max_retries": 3,  # 大模型图片识别最大重试次数
 
-    "delivery_date_threshold_days": 3,  # 交付日期异常阈值（天数），超过此天数差值将触发DMX重新识别
+    "delivery_date_threshold_days": 5,  # 交付日期异常阈值（天数），超过此天数差值将触发DMX重新识别
 
 # 其他配置
     "chrome_address": "127.0.0.1:9333",
