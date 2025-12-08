@@ -12,7 +12,7 @@ from DrissionPage import Chromium, ChromiumOptions
 
 try:
     from app_config import CONFIG
-    from utils.data_manager import DataManager, load_style_db_with_cache, load_supplier_db_with_cache
+    from utils.data_manager import DataManager, load_style_db_with_cache, load_supplier_db_with_cache, load_material_deduction_db_with_cache, apply_material_deduction
     from utils.report_generator import collect_result_data, update_html_report
     from utils.util_llm import extract_data_from_image, extract_data_from_image_dmx
     from rpa_executor import RPAExecutor  # 导入拆分后的执行器
@@ -109,13 +109,35 @@ def normalize_supplier_name(extracted_name, supplier_db):
     clean_extracted = extracted_name.replace("商行", "").replace("有限公司", "").replace("布行", "").strip()
     if not extracted_name: return None
 
+    # 1. 精确匹配
     if extracted_name in supplier_db:
         return extracted_name
 
+    # 2. 清理后缀匹配
+    if clean_extracted in supplier_db:
+        return clean_extracted
+
+    # 3. 包含匹配
     for db_name in supplier_db:
         if extracted_name in db_name: return db_name
         if len(db_name) >= 2 and db_name in extracted_name: return db_name
-        if len(db_name) >= 2 and db_name == clean_extracted: return db_name
+        if len(db_name) >= 2 and db_name in clean_extracted: return db_name
+
+    # 4. OCR字符修正（风/凤互换）
+    corrected_name = clean_extracted
+    if "风" in clean_extracted:
+        corrected_name = clean_extracted.replace("风", "凤")
+    elif "凤" in clean_extracted:
+        corrected_name = clean_extracted.replace("凤", "风")
+    
+    if corrected_name != clean_extracted:
+        if corrected_name in supplier_db:
+            print(f"   [OCR修正] {extracted_name} -> {corrected_name}")
+            return corrected_name
+        # 修正后包含匹配
+        for db_name in supplier_db:
+            if len(db_name) >= 2 and db_name in corrected_name: return db_name
+            if len(corrected_name) >= 2 and corrected_name in db_name: return db_name
 
     def levenshtein_distance(s1, s2):
         if len(s1) < len(s2): return levenshtein_distance(s2, s1)
@@ -180,7 +202,7 @@ def determine_final_style(json_data, style_db):
     return None
 
 
-def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB):
+def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, LOCAL_MATERIAL_DEDUCTION_DB=None, deduction_suppliers=None):
     """解析单张图片"""
     file_name = os.path.basename(img_path)
     try:
@@ -314,6 +336,19 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB):
         parsed_data['retry_count'] = retry_count
         if failure_reason: parsed_data['failure_reason'] = failure_reason
 
+        # 应用物料扣减价格调整
+        if LOCAL_MATERIAL_DEDUCTION_DB and deduction_suppliers:
+            try:
+                adjusted_data, has_adjustment = apply_material_deduction(
+                    parsed_data, LOCAL_MATERIAL_DEDUCTION_DB, deduction_suppliers
+                )
+                if has_adjustment:
+                    parsed_data = adjusted_data
+                    parsed_data['price_adjusted'] = True
+            except Exception as price_adjust_error:
+                print(f"!!! 价格调整异常: {price_adjust_error}")
+                parsed_data['price_adjustment_error'] = str(price_adjust_error)
+
         saved = db_manager.save_data(file_name, parsed_data)
         if not saved:
             return {
@@ -359,6 +394,22 @@ def process_complete_rpa(rpa_executor, result):
             # 使用 executor 实例方法
             match_prompt, match_result, original_records, retry_count = rpa_executor.run_process(parsed_data, file_name,
                                                                                                  img_path)
+
+            # 检查是否在RPA过程中设置了处理失败标记
+            if parsed_data.get('processing_failed', False):
+                print(f"!!! RPA处理失败: {file_name}, 原因: {parsed_data.get('failure_reason', '未知错误')}")
+                # 即使RPA返回了数据，如果标记为处理失败，也应该在报告中反映为失败
+                return collect_result_data(
+                    image_name=file_name,
+                    parsed_data=parsed_data,
+                    final_style=result.get('final_style', ''),
+                    match_prompt=match_prompt or "",
+                    match_result=match_result,
+                    original_records=original_records or [],
+                    image_path=img_path,
+                    retry_count=retry_count,
+                    failure_reason=parsed_data.get('failure_reason', 'RPA处理失败')
+                )
 
             return collect_result_data(
                 image_name=file_name,
@@ -407,6 +458,15 @@ async def async_main():
     LOCAL_SUPPLIER_DB = load_supplier_db_with_cache(supplier_excel_path) if supplier_excel_path else set()
     print(f">>> 月结供应商目录加载完成，共 {len(LOCAL_SUPPLIER_DB)} 个供应商")
 
+    material_deduction_excel_path = CONFIG.get('material_deduction_db_path')
+    material_deduction_name_col = CONFIG.get('material_deduction_name_column', '物料名称')
+    material_deduction_amount_col = CONFIG.get('material_deduction_amount_column', '扣减金额')
+    LOCAL_MATERIAL_DEDUCTION_DB = load_material_deduction_db_with_cache(material_deduction_excel_path, material_deduction_name_col, material_deduction_amount_col) if material_deduction_excel_path else {}
+    print(f">>> 物料扣减列表加载完成，共 {len(LOCAL_MATERIAL_DEDUCTION_DB)} 个物料")
+
+    deduction_suppliers = CONFIG.get('material_deduction_suppliers', [])
+    print(f">>> 扣减供应商列表: {deduction_suppliers}")
+
     storage_path = CONFIG.get('data_storage_path')
     if not storage_path:
         print("错误: 请在 app_config.py 中配置 'data_storage_path'")
@@ -444,7 +504,7 @@ async def async_main():
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as executor:
                 return await loop.run_in_executor(executor, parse_single_image, img_path, db_manager, LOCAL_STYLE_DB,
-                                                  LOCAL_SUPPLIER_DB)
+                                                  LOCAL_SUPPLIER_DB, LOCAL_MATERIAL_DEDUCTION_DB, deduction_suppliers)
 
     parse_tasks = [parse_with_semaphore(img_path) for img_path in image_files]
     parse_results = await asyncio.gather(*parse_tasks, return_exceptions=True)

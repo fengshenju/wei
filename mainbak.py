@@ -862,7 +862,17 @@ def navigate_and_search_purchase_task(tab, order_code, parsed_data):
                                     time.sleep(check_interval)
 
                             if not binding_completed:
-                                print("   ⚠️ 等待绑定超时，尝试继续...")
+                                print("   ❌ 一键绑定失败：加工厂字段未填充，单据处理终止")
+                                data_json['processing_failed'] = True
+                                data_json['failure_reason'] = '一键绑定失败：系统无法为此单据自动分配加工厂'
+                                data_json['failure_stage'] = 'binding_failed'
+                                # 关闭页签并返回
+                                try:
+                                    if tab: tab.close()
+                                except:
+                                    pass
+                                print(f"[{file_name}] 页签已关闭")
+                                return match_prompt, match_result, original_records, retry_count
 
                             # ----------------------------------------------------
                             # 填写码单信息

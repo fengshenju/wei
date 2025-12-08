@@ -10,8 +10,8 @@ CONFIG = {
     # "llm_api_key":"sk-81df8063219a4b398af8ea707e293034",
 
      "llm_image_api_key": [
-         "sk-a58eda60805e41999596ef92fb385480",   # 微妈的阿里API Key
-        "sk-81df8063219a4b398af8ea707e293034" # 微微的阿里API Key
+         "sk-a58eda60805e41999596ef92fb385480bak",   # 微妈的阿里API Key
+        "sk-81df8063219a4b398af8ea707e293034bak" # 微微的阿里API Key
      ],
 
      "llm_api_key": [
@@ -45,7 +45,7 @@ CONFIG = {
     
     # 并发控制配置
     "image_parsing_concurrency": 10,  # 大模型图片识别同时并发数
-    "rpa_concurrency": 10,  # RPA操作并发数
+    "rpa_concurrency": 2,  # RPA操作并发数
     "llm_match_max_retries": 3,  # 大模型文本匹配最大重试次数
     "rpa_browser_to_front": True,  # RPA执行时是否将浏览器窗口置前
     
@@ -75,6 +75,18 @@ CONFIG = {
 
     # 月结供应商目录 Excel 文件路径
     'supplier_db_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/supplier/monthly_suppliers.xlsx',
+
+    # 物料扣减列表 Excel 文件路径
+    'material_deduction_db_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/material/罗卡-素本-单价优惠.xlsx',
+
+    # 物料扣减列表 Excel 中存储物料名称的那一列的表头名称
+    'material_deduction_name_column': '品名',
+    
+    # 物料扣减列表 Excel 中存储扣减金额的那一列的表头名称
+    'material_deduction_amount_column': '销售均价',
+    
+    # 支持物料扣减的供应商列表（这些供应商的商品会进行价格调整）
+    'material_deduction_suppliers': ['发现色彩', '罗卡'],
 
     # 图片数据提取的提示词配置
     'prompt_instruction': """
