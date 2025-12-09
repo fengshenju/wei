@@ -560,10 +560,16 @@ def create_image_result_card(image_name: str, result_data: Dict[str, Any]) -> st
             <span class="key">供应商:</span> <span class="value">{parsed_data.get('supplier_name', 'N/A')}</span>
         </div>
         <div class="key-value">
+            <span class="key">采购助理:</span> <span class="value">{parsed_data.get('purchaser', 'N/A')}</span>
+        </div>
+        <div class="key-value">
             <span class="key">码单号:</span> <span class="value">{parsed_data.get('delivery_order_number', 'N/A')}</span>
         </div>
         <div class="key-value">
             <span class="key">最终款号:</span> <span class="value">{result_data.get('final_style', 'N/A')}</span>
+        </div>
+        <div class="key-value">
+            <span class="key">采购单总金额:</span> <span class="value">{parsed_data.get('total_amount', 'N/A')}</span>
         </div>
         <div class="key-value">
             <span class="key">LLM尝试次数:</span> <span class="value">{result_data.get('retry_count', 1)}</span>

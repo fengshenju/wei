@@ -29,7 +29,8 @@ class RPAUtils:
                         scroll_to_see=True,
                         timeout=0.5):
         """
-        [最终修复版] 兼容 Element 和 Tab/Frame 的暴力日期填充
+        [修复版] 兼容 Element 和 Tab/Frame 的暴力日期填充
+        解决了 'ChromiumElement object has no attribute page' 的崩溃问题
         """
         try:
             if not date_value or not date_value.strip():
@@ -37,7 +38,8 @@ class RPAUtils:
 
             # 1. 查找元素
             date_input = scope.ele(selector, timeout=timeout)
-            if not date_input or not date_input.states.is_displayed:
+            if not date_input:
+                # 尝试稍微等待后再次查找
                 time.sleep(0.2)
                 date_input = scope.ele(selector, timeout=0.2)
                 if not date_input:
@@ -51,53 +53,51 @@ class RPAUtils:
             print(f"   -> [RPAUtils] 正在填入日期: {date_value}")
 
             # ============================================================
-            # [关键修复] 获取操作驱动器 (Driver)
-            # 旧版代码直接操作 Tab/Frame (有actions)，新版传入了 tr (无actions)
-            # 这里通过 .page 属性反向获取所属的 Tab/Frame
+            # [关键修复] 安全地获取操作驱动器 (Driver)
             # ============================================================
             driver = None
-            if hasattr(scope, 'actions'):
-                # 如果传入的就是 Tab 或 Frame
-                driver = scope
-            elif hasattr(scope, 'page'):
-                # 如果传入的是 Element (如 tr)，通过 .page 获取控制器
-                driver = scope.page
-            else:
-                # 兜底：尝试从元素本身获取
+            # 1. 优先尝试从元素本身获取 page 对象 (新版 DrissionPage)
+            if hasattr(date_input, 'page'):
                 driver = date_input.page
+            # 2. 旧版本可能是 owner
+            elif hasattr(date_input, 'owner'):
+                driver = date_input.owner
 
-            # (A) 移除 readonly
+            # 3. 如果 scope 本身就是 Tab/Frame (具有 actions 属性)，则直接使用 scope
+            if not driver and hasattr(scope, 'actions'):
+                driver = scope
+
+            # (A) 移除 readonly (直接在元素上操作，不需要 driver)
             if remove_readonly:
                 date_input.run_js('this.removeAttribute("readonly");')
 
-            # (B) 清空并等待
+            # (B) 清空并输入
             date_input.clear()
             time.sleep(0.1)
-
-            # (C) 模拟键盘打字 (这是最稳妥的输入方式)
             date_input.input(date_value)
             time.sleep(0.2)
 
-            # (D) 模拟按下"回车"键
+            # (C) 模拟按下"回车"键 (触发日历关闭和验证)
             if use_enter_key:
                 if driver:
-                    # 使用找到的 driver (Tab/Frame) 执行动作链
+                    # 使用找到的 driver 执行动作链
                     driver.actions.key_down('ENTER').key_up('ENTER')
                 else:
-                    # 万一找不到 driver，用 JS 模拟回车兜底
-                    print("   ⚠️ 无法获取 Driver，使用 JS 模拟回车")
+                    # [兜底] 如果找不到 driver，使用 JS 模拟回车事件
+                    # print("   ℹ️ 使用 JS 模拟回车")
                     date_input.run_js(
                         'this.dispatchEvent(new KeyboardEvent("keydown", {bubbles:true, keyCode:13, key:"Enter"}));')
                 time.sleep(0.2)
 
-            # (E) 模拟失焦
+            # (D) 模拟失焦 (触发 onchange)
             if click_body_after:
                 if driver:
                     driver.run_js('document.body.click();')
                 else:
-                    date_input.run_js('document.body.click();')
+                    # 如果没有 driver，就让输入框自己失去焦点
+                    date_input.run_js('this.blur();')
 
-                time.sleep(0.1)
+                # 再次点击确保状态重置
                 try:
                     date_input.click()
                 except:
@@ -108,10 +108,11 @@ class RPAUtils:
 
         except Exception as e:
             print(f"   !!! 日期填充异常: {e}")
+            # 最后的暴力兜底：直接修改 value 并触发 change
             try:
                 if date_input:
-                    date_input.run_js(
-                        f'this.removeAttribute("readonly"); this.value="{date_value}"; this.dispatchEvent(new Event("change"));')
+                    js = f'this.removeAttribute("readonly"); this.value="{date_value}"; this.dispatchEvent(new Event("change"));'
+                    date_input.run_js(js)
             except:
                 pass
             return False
@@ -163,7 +164,8 @@ class RPAUtils:
             time.sleep(0.5)
             
             # 5. 在结果表格中查找匹配的单元格
-            target_td_xpath = f'x://table[@id="{table_id}"]//tbody//tr//td[text()="{search_value}"]'
+            # target_td_xpath = f'x://table[@id="{table_id}"]//tbody//tr//td[text()="{search_value}"]'
+            target_td_xpath = f'x://table[@id="{table_id}"]//tbody//tr//td[contains(text(), "{search_value}")]'
             target_td = scope.ele(target_td_xpath, timeout=timeout)
             
             if target_td:
@@ -823,27 +825,42 @@ class RPAUtils:
 
     @staticmethod
     def fill_details_into_table(scope, structured_tasks):
-        """填充物料明细数据到表格"""
+        """
+        填充物料明细数据到表格
+        [完全还原版] 严格复刻老代码逻辑：
+        1. 单位：优先弹窗(模拟回车搜索+JS双击)，弹窗未出则直接input输入
+        2. 价格/数量：使用JS注入+事件触发
+        3. 日期：模拟Selenium的 removeReadonly + input + 回车
+        """
         print(f">>> 开始填充物料明细数据，共 {len(structured_tasks)} 条任务...")
         count_success = 0
+
         for task in structured_tasks:
             try:
                 record_id = task['record'].get('Id')
                 match_type = task['match_type']
                 items = task['items']
-                if not record_id or not items: continue
 
+                if not record_id or not items:
+                    continue
+
+                # --- 1. 定位行 (TR) ---
                 tr_xpath = f'x://tr[.//input[@name="materialReqId" and @value="{record_id}"]]'
                 tr = scope.ele(tr_xpath, timeout=1)
+
                 if not tr:
                     print(f"   ⚠️ 未找到 ID 为 {record_id} 的行，跳过")
                     continue
+
+                # 确保行可见
                 tr.scroll.to_see()
 
+                # --- 2. 计算填入的数据 ---
                 target_unit = ""
                 target_price = 0.0
                 target_qty = 0.0
                 target_date = ""
+
                 first_item = items[0]
                 raw_unit = first_item.get('unit', '')
                 raw_price = first_item.get('price', 0)
@@ -854,35 +871,65 @@ class RPAUtils:
                     target_price = raw_price
                     target_qty = first_item.get('qty', 0)
                     target_date = raw_date
+
                 elif match_type == 'MERGE':
                     total_qty = sum([float(i.get('qty', 0)) for i in items])
                     target_unit = raw_unit
                     target_price = raw_price
                     target_qty = total_qty
                     target_date = raw_date
-                    print(f"   ℹ️ [合并] 记录 {record_id} 聚合了 {len(items)} 条明细")
+                    print(f"   ℹ️ [合并] 记录 {record_id} 聚合了 {len(items)} 条明细，总数: {target_qty}")
+
                 elif match_type == 'SPLIT':
                     target_unit = raw_unit
                     target_price = raw_price
                     target_qty = first_item.get('qty', 0)
                     target_date = raw_date
+                    print(f"   ℹ️ [拆分] 记录 {record_id} 强制调整数量为: {target_qty}")
 
+                # --- 3. 执行填入操作 (严格遵照老代码逻辑) ---
+
+                # A. 填入采购单位 (模拟：点击->搜索->双击)
                 if target_unit:
-                    # 使用通用弹框搜索方法选择计量单位
-                    if not RPAUtils.search_and_select_from_popup(
-                        scope=scope,
-                        trigger_selector='css:input[name="unitCalc"]',
-                        search_input_selector='#txtMeteringPlusKey',
-                        table_id='meteringPlusGrid',
-                        search_value=target_unit,
-                        item_name='计量单位',
-                        timeout=1
-                    ):
-                        # 回退方案：直接在输入框中输入
-                        inp_unit = tr.ele('css:input[name="unitCalc"]', timeout=0.5)
-                        if inp_unit:
+                    inp_unit = tr.ele('css:input[name="unitCalc"]', timeout=0.5)
+                    if inp_unit:
+                        # 1. 点击弹出窗口
+                        inp_unit.click()
+                        time.sleep(0.5)  # 等待弹窗动画
+
+                        # 2. 定位弹窗中的搜索框
+                        search_box = scope.ele('#txtMeteringPlusKey', timeout=1)
+
+                        if search_box and search_box.states.is_displayed:
+                            # 3. 输入单位并回车
+                            search_box.clear()
+                            search_box.input(target_unit)
+                            time.sleep(0.2)
+                            scope.actions.key_down('ENTER').key_up('ENTER')  # 模拟回车键搜索
+                            time.sleep(0.5)  # 给一点点时间让表格刷新
+
+                            # 4. 在结果表格中找到完全匹配的那一行并双击
+                            target_td_xpath = f'x://table[@id="meteringPlusGrid"]//tbody//tr//td[text()="{target_unit}"]'
+                            target_td = scope.ele(target_td_xpath, timeout=1)
+
+                            if target_td:
+                                print(f"   -> 找到单位单元格 [{target_unit}]，执行JS双击...")
+                                # 使用老代码的 JS 双击逻辑
+                                js_code = """
+                                        this.click(); 
+                                        this.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true, view: window}));
+                                    """
+                                target_td.run_js(js_code)
+                                time.sleep(0.5)
+                            else:
+                                print(f"   ⚠️ 单位弹窗中未搜索到: {target_unit}")
+                                inp_unit.click()  # 尝试关闭弹窗
+                        else:
+                            # 如果弹窗没出来，尝试直接输入(兜底)
+                            print("   ⚠️ 单位选择弹窗未出现，尝试直接输入")
                             inp_unit.input(target_unit, clear=True)
 
+                # B. 填入含税单价 (老代码使用 JS 注入)
                 if target_price is not None:
                     inp_price = tr.ele('css:input[name="Price"]', timeout=0.2)
                     if inp_price:
@@ -891,6 +938,7 @@ class RPAUtils:
                         inp_price.run_js(js)
                         time.sleep(0.1)
 
+                # C. 填入数量 (老代码使用 JS 注入)
                 if target_qty is not None:
                     inp_qty = tr.ele('css:input[name="Qty"]', timeout=0.2)
                     if inp_qty:
@@ -899,29 +947,88 @@ class RPAUtils:
                         inp_qty.run_js(js)
                         time.sleep(0.1)
 
+                # D. 触发总价计算 (点击 totalAmount)
                 inp_total = tr.ele('css:input[name="totalAmount"]', timeout=0.2)
                 if inp_total:
                     inp_total.click()
                     time.sleep(0.2)
 
+                # E. 填入交付日期 (老代码使用 input 模拟)
                 if target_date and target_date.strip():
-                    if not RPAUtils.fill_date_input(tr, 'css:input.deliveryDate', target_date,
-                                                    remove_readonly=True,
-                                                    trigger_events=True,
-                                                    use_enter_key=True,
-                                                    click_body_after=True,
-                                                    timeout=0.5):
-                        # 回退方案：直接通过JavaScript设置值
+                    inp_date = tr.ele('css:input.deliveryDate', timeout=0.5)
+
+                    if inp_date:
                         try:
-                            inp_date = tr.ele('css:input.deliveryDate', timeout=0.5)
-                            if inp_date:
+                            print(f"   -> 正在填入日期: {target_date}")
+
+                            # 1. 移除 readonly
+                            inp_date.run_js('this.removeAttribute("readonly");')
+
+                            # 2. 清空并输入
+                            inp_date.clear()
+                            time.sleep(0.1)
+                            inp_date.input(target_date)
+                            time.sleep(0.2)
+
+                            # 3. 模拟回车 (关键)
+                            scope.actions.key_down('ENTER').key_up('ENTER')
+                            time.sleep(0.2)
+
+                            # 4. 强制失焦
+                            scope.run_js('document.body.click();')
+                            inp_date.click()  # 重新点击一下确保焦点状态正常
+                            time.sleep(0.2)
+                        except Exception as e:
+                            print(f"   ⚠️ 日期输入异常: {e}")
+                            # 兜底
+                            try:
                                 inp_date.run_js(f'this.removeAttribute("readonly"); this.value="{target_date}";')
-                        except:
-                            pass
+                            except:
+                                pass
 
                 count_success += 1
-                time.sleep(0.1)
+                time.sleep(0.1)  # 防抖
+
             except Exception as e:
                 print(f"   !!! 填充行数据失败 (Record: {task.get('record', {}).get('Id')}): {e}")
 
         print(f"✅ 数据填充完成: 成功处理 {count_success}/{len(structured_tasks)} 行")
+
+    @staticmethod
+    def extract_total_amount_from_table(scope):
+        """
+        从物料采购单表格中提取总金额
+        查找带有 class="sumqty" 的 span 元素，并提取其中的总金额数值
+        
+        :param scope: 操作作用域对象（tab、frame等）
+        :return: 清理后的总金额字符串，失败时返回None
+        """
+        try:
+            # 查找带有 sumqty class 的 span 元素
+            sumqty_element = scope.ele('css:span.sumqty', timeout=2)
+            if sumqty_element and sumqty_element.states.is_displayed:
+                # 获取元素的文本内容
+                total_amount_text = sumqty_element.text.strip()
+                
+                if total_amount_text:
+                    # 清理金额格式，移除常见的货币符号和格式字符
+                    clean_amount = (total_amount_text
+                                  .replace(',', '')      # 移除千位分隔符
+                                  .replace('￥', '')      # 移除人民币符号
+                                  .replace('¥', '')       # 移除日元符号
+                                  .replace('$', '')       # 移除美元符号
+                                  .replace('€', '')       # 移除欧元符号
+                                  .strip())               # 移除首尾空格
+                    
+                    print(f"   -> 提取到总金额文本: '{total_amount_text}' -> 清理后: '{clean_amount}'")
+                    return clean_amount
+                else:
+                    print("   -> sumqty 元素文本为空")
+                    return None
+            else:
+                print("   -> 未找到可见的 span.sumqty 元素")
+                return None
+                
+        except Exception as e:
+            print(f"   !!! 提取总金额异常: {e}")
+            return None

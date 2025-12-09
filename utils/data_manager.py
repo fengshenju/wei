@@ -203,15 +203,19 @@ def load_style_db_with_cache(file_path, column_name='款式编号', cache_dir=No
     return cache_manager.get_style_db(column_name)
 
 
-def load_supplier_db_from_excel(file_path):
+def load_supplier_db_from_excel(file_path, supplier_column=None, purchaser_column=None):
     """
-    读取 Excel 文件的第一列，加载月结供应商目录为 set 集合
+    读取 Excel 文件，加载供应商目录和采购助理映射
     :param file_path: Excel 文件路径
-    :return: 包含所有供应商名称的 set 集合
+    :param supplier_column: 供应商名称列名，None时使用第一列
+    :param purchaser_column: 采购助理列名，None时不读取采购助理信息
+    :return: 
+        - 如果只读取供应商名称：返回包含所有供应商名称的 set 集合（向后兼容）
+        - 如果同时读取采购助理：返回字典 {'suppliers': set, 'purchaser_mapping': dict}
     """
     if not os.path.exists(file_path):
         print(f"!!! 错误: 供应商目录文件未找到: {file_path}")
-        return set()
+        return set() if purchaser_column is None else {'suppliers': set(), 'purchaser_mapping': {}}
 
     print(f">>> 正在读取供应商目录 Excel: {os.path.basename(file_path)} ...")
 
@@ -221,26 +225,66 @@ def load_supplier_db_from_excel(file_path):
 
         if df.empty:
             print(f"!!! 错误: Excel文件为空")
-            return set()
+            return set() if purchaser_column is None else {'suppliers': set(), 'purchaser_mapping': {}}
 
-        # 读取第一列（索引为0），自动获取列名
-        first_column = df.iloc[:, 0]
+        # 读取供应商列
+        if supplier_column is None:
+            # 向后兼容：使用第一列
+            supplier_series = df.iloc[:, 0]
+            print(f"    使用第一列作为供应商名称列")
+        else:
+            # 使用指定列名
+            if supplier_column not in df.columns:
+                print(f"!!! 错误: 未找到供应商名称列 '{supplier_column}'")
+                print(f"    可用列名: {list(df.columns)}")
+                return set() if purchaser_column is None else {'suppliers': set(), 'purchaser_mapping': {}}
+            supplier_series = df[supplier_column]
+            print(f"    使用列 '{supplier_column}' 作为供应商名称")
         
-        # 去除空值，转为字符串，去除首尾空格
-        clean_series = first_column.dropna().astype(str).str.strip()
-        
-        # 转换为集合 (自动去重)
-        supplier_set = set(clean_series)
+        # 清理供应商数据
+        clean_suppliers = supplier_series.dropna().astype(str).str.strip()
+        supplier_set = set(clean_suppliers)
 
-        print(f">>> 供应商目录加载成功! 共加载 {len(supplier_set)} 个唯一供应商。")
-        # 打印前5个看看样子，确保没读错
-        print(f"    示例数据: {list(supplier_set)[:5]}")
+        # 如果不需要读取采购助理，返回供应商集合（向后兼容）
+        if purchaser_column is None:
+            print(f">>> 供应商目录加载成功! 共加载 {len(supplier_set)} 个唯一供应商。")
+            print(f"    示例数据: {list(supplier_set)[:5]}")
+            return supplier_set
 
-        return supplier_set
+        # 读取采购助理列
+        if purchaser_column not in df.columns:
+            print(f"!!! 警告: 未找到采购助理列 '{purchaser_column}'，仅返回供应商信息")
+            print(f"    可用列名: {list(df.columns)}")
+            purchaser_mapping = {}
+        else:
+            print(f"    使用列 '{purchaser_column}' 作为采购助理")
+            # 创建供应商到采购助理的映射
+            purchaser_mapping = {}
+            for idx, (supplier, purchaser) in enumerate(zip(clean_suppliers, df[purchaser_column])):
+                if pd.notna(supplier) and supplier.strip():
+                    supplier_clean = supplier.strip()
+                    purchaser_clean = str(purchaser).strip() if pd.notna(purchaser) else ""
+                    # 如果采购助理为空或不存在，设置为"不存在"
+                    if not purchaser_clean:
+                        purchaser_clean = "不存在"
+                    purchaser_mapping[supplier_clean] = purchaser_clean
+
+        result = {
+            'suppliers': supplier_set,
+            'purchaser_mapping': purchaser_mapping
+        }
+
+        print(f">>> 供应商目录加载成功! 共加载 {len(supplier_set)} 个唯一供应商，{len(purchaser_mapping)} 个采购助理映射。")
+        print(f"    供应商示例: {list(supplier_set)[:3]}")
+        if purchaser_mapping:
+            sample_mappings = list(purchaser_mapping.items())[:3]
+            print(f"    采购助理映射示例: {sample_mappings}")
+
+        return result
 
     except Exception as e:
         print(f"!!! 读取 Excel 失败: {e}")
-        return set()
+        return set() if purchaser_column is None else {'suppliers': set(), 'purchaser_mapping': {}}
 
 
 def load_material_deduction_db_from_excel(file_path, name_column='物料名称', amount_column='扣减金额'):
@@ -315,21 +359,33 @@ class SupplierDBCache:
     功能：检查 Excel 文件修改时间，决定是否从缓存读取还是重新解析
     """
     
-    def __init__(self, excel_path, cache_dir=None):
+    def __init__(self, excel_path, cache_dir=None, supplier_column=None, purchaser_column=None):
         """
         初始化缓存管理器
         :param excel_path: Excel 文件路径
         :param cache_dir: 缓存目录，默认与 Excel 同目录
+        :param supplier_column: 供应商名称列名
+        :param purchaser_column: 采购助理列名
         """
         self.excel_path = excel_path
+        self.supplier_column = supplier_column
+        self.purchaser_column = purchaser_column
         
         # 如果未指定缓存目录，使用 Excel 文件同目录
         if cache_dir is None:
             cache_dir = os.path.dirname(excel_path)
         
-        # 生成缓存文件路径
+        # 生成缓存文件路径，包含列配置信息以避免缓存混乱
         excel_filename = os.path.splitext(os.path.basename(excel_path))[0]
-        self.cache_path = os.path.join(cache_dir, f"{excel_filename}_supplier_cache.json")
+        # 创建唯一的缓存标识
+        cache_suffix = ""
+        if supplier_column:
+            cache_suffix += f"_s_{supplier_column}"
+        if purchaser_column:
+            cache_suffix += f"_p_{purchaser_column}"
+        cache_suffix = cache_suffix.replace(" ", "_").replace("/", "_")  # 清理文件名特殊字符
+        
+        self.cache_path = os.path.join(cache_dir, f"{excel_filename}_supplier_cache{cache_suffix}.json")
         
     def _get_file_mtime(self, file_path):
         """获取文件修改时间"""
@@ -348,14 +404,32 @@ class SupplierDBCache:
         
         return cache_mtime > excel_mtime
         
-    def _save_cache(self, supplier_set):
+    def _save_cache(self, supplier_data):
         """保存缓存到 JSON 文件"""
         try:
-            cache_data = {
-                'supplier_list': list(supplier_set),
-                'cache_time': time.time(),
-                'source_excel': self.excel_path
-            }
+            # 处理不同的数据格式（set 或 dict）
+            if isinstance(supplier_data, set):
+                # 向后兼容：旧格式
+                cache_data = {
+                    'supplier_list': list(supplier_data),
+                    'cache_time': time.time(),
+                    'source_excel': self.excel_path,
+                    'supplier_column': self.supplier_column,
+                    'purchaser_column': self.purchaser_column,
+                    'data_format': 'set'
+                }
+            else:
+                # 新格式：包含供应商和采购助理映射
+                cache_data = {
+                    'supplier_list': list(supplier_data.get('suppliers', set())),
+                    'purchaser_mapping': supplier_data.get('purchaser_mapping', {}),
+                    'cache_time': time.time(),
+                    'source_excel': self.excel_path,
+                    'supplier_column': self.supplier_column,
+                    'purchaser_column': self.purchaser_column,
+                    'data_format': 'dict'
+                }
+            
             with open(self.cache_path, 'w', encoding='utf-8') as f:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
             print(f">>> 供应商缓存已保存: {os.path.basename(self.cache_path)}")
@@ -369,9 +443,26 @@ class SupplierDBCache:
         try:
             with open(self.cache_path, 'r', encoding='utf-8') as f:
                 cache_data = json.load(f)
-            supplier_set = set(cache_data['supplier_list'])
-            print(f">>> 从缓存加载供应商目录: {len(supplier_set)} 个供应商")
-            return supplier_set
+            
+            # 检查数据格式
+            data_format = cache_data.get('data_format', 'set')  # 默认为旧格式
+            
+            if data_format == 'set':
+                # 旧格式：返回供应商集合
+                supplier_set = set(cache_data['supplier_list'])
+                print(f">>> 从缓存加载供应商目录: {len(supplier_set)} 个供应商")
+                return supplier_set
+            else:
+                # 新格式：返回包含供应商和采购助理映射的字典
+                supplier_set = set(cache_data.get('supplier_list', []))
+                purchaser_mapping = cache_data.get('purchaser_mapping', {})
+                result = {
+                    'suppliers': supplier_set,
+                    'purchaser_mapping': purchaser_mapping
+                }
+                print(f">>> 从缓存加载供应商目录: {len(supplier_set)} 个供应商，{len(purchaser_mapping)} 个采购助理映射")
+                return result
+                
         except Exception as e:
             print(f"!!! 读取供应商缓存失败: {e}")
             return None
@@ -379,7 +470,7 @@ class SupplierDBCache:
     def get_supplier_db(self):
         """
         获取供应商目录（优先从缓存，缓存无效时从 Excel 重新加载）
-        :return: 包含所有供应商名称的 set 集合
+        :return: 包含所有供应商名称的 set 集合，或者包含供应商和采购助理映射的字典
         """
         # 检查缓存是否有效
         if self._is_cache_valid():
@@ -390,24 +481,32 @@ class SupplierDBCache:
                 
         # 缓存无效，从 Excel 重新加载
         print(f">>> 供应商缓存无效或不存在，从 Excel 重新加载...")
-        supplier_set = load_supplier_db_from_excel(self.excel_path)
+        supplier_data = load_supplier_db_from_excel(
+            self.excel_path, 
+            self.supplier_column, 
+            self.purchaser_column
+        )
         
         # 保存新的缓存
-        if supplier_set:
-            self._save_cache(supplier_set)
+        if supplier_data:
+            self._save_cache(supplier_data)
             
-        return supplier_set
+        return supplier_data
 
 
-def load_supplier_db_with_cache(file_path, cache_dir=None):
+def load_supplier_db_with_cache(file_path, cache_dir=None, supplier_column=None, purchaser_column=None):
     """
     使用缓存机制加载供应商目录（推荐使用此函数替代 load_supplier_db_from_excel）
     
     :param file_path: Excel 文件路径
     :param cache_dir: 缓存目录，默认与 Excel 同目录
-    :return: 包含所有供应商名称的 set 集合
+    :param supplier_column: 供应商名称列名，None时使用第一列
+    :param purchaser_column: 采购助理列名，None时不读取采购助理信息
+    :return: 
+        - 如果只读取供应商名称：包含所有供应商名称的 set 集合（向后兼容）
+        - 如果同时读取采购助理：字典 {'suppliers': set, 'purchaser_mapping': dict}
     """
-    cache_manager = SupplierDBCache(file_path, cache_dir)
+    cache_manager = SupplierDBCache(file_path, cache_dir, supplier_column, purchaser_column)
     return cache_manager.get_supplier_db()
 
 

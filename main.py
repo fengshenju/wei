@@ -9,6 +9,7 @@ import glob
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from DrissionPage import Chromium, ChromiumOptions
+import shutil
 
 try:
     from app_config import CONFIG
@@ -24,6 +25,55 @@ except ImportError as e:
 # 从配置文件获取提示词
 PROMPT_INSTRUCTION = CONFIG.get('prompt_instruction', '')
 
+
+def archive_success_image(img_path, parsed_data):
+    """
+    [新增] 成功图片归档处理
+    格式：采购助理_品牌_供应商_合计金额_序号.png
+    """
+    try:
+        archive_dir = CONFIG.get('success_archive_path')
+        if not archive_dir or not os.path.exists(img_path):
+            return
+
+        if not os.path.exists(archive_dir):
+            os.makedirs(archive_dir)
+
+        # 1. 获取字段
+        purchaser = parsed_data.get('purchaser', '未知助理').strip()
+        supplier = parsed_data.get('supplier_name', '未知供应商').strip()
+        amount = str(parsed_data.get('total_amount', '0')).replace(',', '').strip()
+
+        # 2. 识别品牌 (复用业务规则)
+        style = parsed_data.get('final_selected_style', '').upper()
+        brand = "其他品牌"
+        if style.startswith('T'):
+            brand = "CHENXIHE"
+        elif style.startswith('X'):
+            brand = "CHENXIHE抖音"
+        elif style.startswith('H'):
+            brand = "SUNONEONE"
+        elif style.startswith('D'):
+            brand = "SUNONEONE抖音"
+
+        # 3. 生成序号 (基于当日归档目录下的文件数量 + 1)
+        # 获取当天日期字符串，确保跨天不重复(虽然文件名没要求带日期，但为了计算当日递增，建议简单计算目录下总数)
+        # 这里为了简单且保证文件名唯一性，直接计算该目录下现有文件数 + 1
+        current_count = len(glob.glob(os.path.join(archive_dir, "*.png"))) + 1
+
+        # 4. 组装文件名
+        new_name = f"{purchaser}_{brand}_{supplier}_{amount}_{current_count}.png"
+        # 处理文件名中可能存在的非法字符
+        new_name = new_name.replace('/', '_').replace('\\', '_')
+
+        dest_path = os.path.join(archive_dir, new_name)
+
+        # 5. 复制文件
+        shutil.copy2(img_path, dest_path)
+        print(f"✅ [归档成功] 图片已归档至: {new_name}")
+
+    except Exception as e:
+        print(f"⚠️ [归档失败] {e}")
 
 def should_use_dmx_for_date_check(delivery_date_str):
     """
@@ -202,7 +252,7 @@ def determine_final_style(json_data, style_db):
     return None
 
 
-def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, LOCAL_MATERIAL_DEDUCTION_DB=None, deduction_suppliers=None):
+def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, LOCAL_MATERIAL_DEDUCTION_DB=None, deduction_suppliers=None, LOCAL_PURCHASER_MAPPING=None):
     """解析单张图片"""
     file_name = os.path.basename(img_path)
     try:
@@ -237,7 +287,13 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
 
         if supplier_name:
             parsed_data['supplier_name'] = supplier_name
-            print(f"匹配供应商: {supplier_name}")
+            # 添加采购助理信息
+            if LOCAL_PURCHASER_MAPPING:
+                purchaser = LOCAL_PURCHASER_MAPPING.get(supplier_name, "不存在")
+                parsed_data['purchaser'] = purchaser
+                print(f"匹配供应商: {supplier_name}, 采购助理: {purchaser}")
+            else:
+                print(f"匹配供应商: {supplier_name}")
         else:
             print(f"!!! 首次供应商匹配失败: [{parsed_data.get('supplier_name')}]，正在使用 DMX 进行重试识别...")
             dmx_parsed_data = extract_data_from_image_dmx(img_path, current_prompt, 0)
@@ -248,6 +304,10 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
                     print(f"✅ DMX 重试挽回成功! 匹配到供应商: {retry_supplier_name}")
                     parsed_data = dmx_parsed_data
                     parsed_data['supplier_name'] = retry_supplier_name
+                    # 添加采购助理信息
+                    if LOCAL_PURCHASER_MAPPING:
+                        purchaser = LOCAL_PURCHASER_MAPPING.get(retry_supplier_name, "不存在")
+                        parsed_data['purchaser'] = purchaser
                     final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
                     parsed_data['final_selected_style'] = final_style
                     dmx_success = True
@@ -275,6 +335,10 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
                 if temp_supplier:
                     parsed_data = dmx_date_data
                     parsed_data['supplier_name'] = temp_supplier
+                    # 添加采购助理信息
+                    if LOCAL_PURCHASER_MAPPING:
+                        purchaser = LOCAL_PURCHASER_MAPPING.get(temp_supplier, "不存在")
+                        parsed_data['purchaser'] = purchaser
                     final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
                     parsed_data['final_selected_style'] = final_style
                     parsed_data['used_dmx_for_date_check'] = True
@@ -310,6 +374,10 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
                             final_style = retry_final_style
                             parsed_data['final_selected_style'] = final_style
                             parsed_data['supplier_name'] = s_name
+                            # 添加采购助理信息
+                            if LOCAL_PURCHASER_MAPPING:
+                                purchaser = LOCAL_PURCHASER_MAPPING.get(s_name, "不存在")
+                                parsed_data['purchaser'] = purchaser
                             failure_reason = None
                             break
                         else:
@@ -395,21 +463,42 @@ def process_complete_rpa(rpa_executor, result):
             match_prompt, match_result, original_records, retry_count = rpa_executor.run_process(parsed_data, file_name,
                                                                                                  img_path)
 
-            # 检查是否在RPA过程中设置了处理失败标记
+            # -------------------------------------------------------------------------
+            # [核心修复]：检查 RPA 过程中的失败标记
+            # -------------------------------------------------------------------------
             if parsed_data.get('processing_failed', False):
-                print(f"!!! RPA处理失败: {file_name}, 原因: {parsed_data.get('failure_reason', '未知错误')}")
-                # 即使RPA返回了数据，如果标记为处理失败，也应该在报告中反映为失败
+                failure_msg = parsed_data.get('failure_reason', 'RPA处理失败')
+                print(f"!!! RPA处理失败: {file_name}, 原因: {failure_msg}")
+
+                # ⚠️ 关键点：如果 RPA 失败，强制将 match_result 的状态改为 fail
+                # 这样报告生成器才会将其渲染为失败/红色，而不是因为 LLM 匹配成功就显示成功
+                if match_result:
+                    match_result['status'] = 'fail'
+                    # 将 RPA 的失败原因追加到 reason 中
+                    old_reason = match_result.get('reason', '')
+                    match_result['reason'] = f"{old_reason} | RPA执行失败: {failure_msg}"
+                else:
+                    # 如果本来就没有 match_result，手动造一个失败的结果
+                    match_result = {
+                        'status': 'fail',
+                        'reason': f"RPA执行失败: {failure_msg}"
+                    }
+
                 return collect_result_data(
                     image_name=file_name,
                     parsed_data=parsed_data,
                     final_style=result.get('final_style', ''),
                     match_prompt=match_prompt or "",
-                    match_result=match_result,
+                    match_result=match_result,  # 传入修改后的失败结果
                     original_records=original_records or [],
                     image_path=img_path,
                     retry_count=retry_count,
-                    failure_reason=parsed_data.get('failure_reason', 'RPA处理失败')
+                    failure_reason=failure_msg
                 )
+            # -------------------------------------------------------------------------
+
+            if parsed_data.get('total_amount'):
+                archive_success_image(img_path, parsed_data)
 
             return collect_result_data(
                 image_name=file_name,
@@ -448,15 +537,35 @@ def process_complete_rpa(rpa_executor, result):
             failure_reason=str(e)
         )
 
-
 async def async_main():
     excel_path = CONFIG.get('style_db_path')
     col_name = CONFIG.get('style_db_column', '款式编号')
     LOCAL_STYLE_DB = load_style_db_with_cache(excel_path, col_name)
 
     supplier_excel_path = CONFIG.get('supplier_db_path')
-    LOCAL_SUPPLIER_DB = load_supplier_db_with_cache(supplier_excel_path) if supplier_excel_path else set()
-    print(f">>> 月结供应商目录加载完成，共 {len(LOCAL_SUPPLIER_DB)} 个供应商")
+    supplier_column = CONFIG.get('supplier_name_column')
+    purchaser_column = CONFIG.get('supplier_purchaser_column')
+    
+    if supplier_excel_path:
+        supplier_data = load_supplier_db_with_cache(
+            supplier_excel_path, 
+            supplier_column=supplier_column,
+            purchaser_column=purchaser_column
+        )
+        
+        # 兼容处理：如果返回的是字典，提取供应商集合；如果是集合，直接使用
+        if isinstance(supplier_data, dict):
+            LOCAL_SUPPLIER_DB = supplier_data.get('suppliers', set())
+            LOCAL_PURCHASER_MAPPING = supplier_data.get('purchaser_mapping', {})
+            print(f">>> 月结供应商目录加载完成，共 {len(LOCAL_SUPPLIER_DB)} 个供应商，{len(LOCAL_PURCHASER_MAPPING)} 个采购助理映射")
+        else:
+            # 向后兼容：旧格式返回set
+            LOCAL_SUPPLIER_DB = supplier_data
+            LOCAL_PURCHASER_MAPPING = {}
+            print(f">>> 月结供应商目录加载完成，共 {len(LOCAL_SUPPLIER_DB)} 个供应商")
+    else:
+        LOCAL_SUPPLIER_DB = set()
+        LOCAL_PURCHASER_MAPPING = {}
 
     material_deduction_excel_path = CONFIG.get('material_deduction_db_path')
     material_deduction_name_col = CONFIG.get('material_deduction_name_column', '物料名称')
@@ -504,7 +613,7 @@ async def async_main():
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as executor:
                 return await loop.run_in_executor(executor, parse_single_image, img_path, db_manager, LOCAL_STYLE_DB,
-                                                  LOCAL_SUPPLIER_DB, LOCAL_MATERIAL_DEDUCTION_DB, deduction_suppliers)
+                                                  LOCAL_SUPPLIER_DB, LOCAL_MATERIAL_DEDUCTION_DB, deduction_suppliers, LOCAL_PURCHASER_MAPPING)
 
     parse_tasks = [parse_with_semaphore(img_path) for img_path in image_files]
     parse_results = await asyncio.gather(*parse_tasks, return_exceptions=True)

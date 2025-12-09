@@ -144,7 +144,7 @@ class RPAExecutor:
                             if matched_ids:
                                 RPAUtils.select_matched_checkboxes(tab, matched_ids)
 
-                                print(">>> 正在查找并点击“物料采购单”生成按钮...")
+                                print(">>> 正在查找并点击\"物料采购单\"生成按钮...")
                                 button_found = False
                                 scopes = [tab] + [f for f in tab.eles('tag:iframe') if f.states.is_displayed]
 
@@ -164,9 +164,9 @@ class RPAExecutor:
                                         break
 
                                 if not button_found:
-                                    print("⚠️ 未找到“物料采购单”按钮")
+                                    print("⚠️ 未找到\"物料采购单\"按钮")
                                 else:
-                                    print(">>> 正在等待页面加载并切换为“月结采购”...")
+                                    print(">>> 正在等待页面加载并切换为\"月结采购\"...")
                                     time.sleep(2)
                                     type_selected = False
                                     current_scopes = [tab] + [f for f in tab.eles('tag:iframe') if
@@ -184,7 +184,7 @@ class RPAExecutor:
                                                                    timeout=1)
                                                 if option and option.states.is_displayed:
                                                     option.click()
-                                                    print("✅ 成功选择“月结采购”")
+                                                    print("✅ 成功选择\"月结采购\"")
                                                     type_selected = True
                                                     time.sleep(1)
                                                     break
@@ -277,7 +277,16 @@ class RPAExecutor:
 
                                     RPAUtils.fill_details_into_table(scope, structured_tasks)
 
-                                    print(">>> 表格填写完毕，正在查找并点击“保存并审核”按钮...")
+                                    # 提取物料采购单总金额
+                                    print(">>> 表格填写完毕，正在提取物料采购单总金额...")
+                                    total_amount = RPAUtils.extract_total_amount_from_table(scope)
+                                    if total_amount:
+                                        print(f"✅ 成功提取总金额: {total_amount}")
+                                        data_json['total_amount'] = total_amount
+                                    else:
+                                        print("⚠️ 未能提取到总金额")
+
+                                    print(">>> 表格填写完毕，正在查找并点击\"保存并审核\"按钮...")
                                     try:
                                         save_btn = scope.ele('css:button[data-amid="btnSaveAndAudit"]', timeout=1)
                                         if not save_btn:
@@ -288,7 +297,7 @@ class RPAExecutor:
                                             save_btn.scroll.to_see()
                                             time.sleep(0.5)
                                             save_btn.click()
-                                            print("✅ 成功点击“保存并审核”")
+                                            print("✅ 成功点击\"保存并审核\"")
 
                                             RPAUtils.handle_alert_confirmation(tab, timeout=2)
 
@@ -308,7 +317,7 @@ class RPAExecutor:
                                             except Exception as e:
                                                 print(f"!!! 获取订单编号异常: {e}")
 
-                                            print(">>> 准备跳转至“物料采购订单”列表...")
+                                            print(">>> 准备跳转至\"物料采购订单\"列表...")
                                             time.sleep(0.5)
 
                                             try:
@@ -421,7 +430,7 @@ class RPAExecutor:
                                                                                     timeout=3): tab.alert.accept()
                                                                             except:
                                                                                 pass
-                                                                            print("✅ 成功点击“执行采购任务”")
+                                                                            print("✅ 成功点击\"执行采购任务\"")
                                                                             time.sleep(2)
 
                                                                             try:
@@ -445,11 +454,9 @@ class RPAExecutor:
                                                                                         data_json['processing_failed'] = True
                                                                                         data_json['failure_reason'] = task_result.get('error', '物料采购任务处理失败')
                                                                                         data_json['failure_stage'] = task_result.get('error_stage', 'unknown')
-                                                                                    else:
-                                                                                        # 只有成功时才处理账单
-                                                                                        self.process_bill_list(tab,
-                                                                                                                   data_json.get(
-                                                                                                                       'rpa_order_code'))
+                                                                                    # else:
+                                                                                    #     # 只有成功时才处理账单
+                                                                                    #     self.process_bill_list(tab,data_json.get('rpa_order_code'))
                                                                             except Exception:
                                                                                 print("⚠️ 未检测到结果弹窗")
                                                                 except Exception as e:
@@ -650,7 +657,7 @@ class RPAExecutor:
                             table_selector='css:table#poMtPurTaskGrid tbody tr',
                             label="首次勾选"
                         )
-                        print(">>> [1/3] 准备点击“一键绑定加工单”...")
+                        print(">>> [1/3] 准备点击\"一键绑定加工单\"...")
                         try:
                             btn_bind = target_frame.ele('#btnOneKeyBindPM', timeout=2)
                             if btn_bind:
@@ -663,7 +670,7 @@ class RPAExecutor:
                                     pass
                                 time.sleep(1)
                                 RPAUtils.handle_alert_confirmation(tab, timeout=2)
-                                print("   ✅ 一键绑定操作结束")
+                                print("   ✅ \"一键绑定\"操作结束")
 
                                 print(">>> 等待系统处理一键绑定(页面可能刷新)...")
                                 binding_completed = False
@@ -719,6 +726,24 @@ class RPAExecutor:
                                         "error": "一键绑定失败：系统无法为此单据自动分配加工厂",
                                         "error_stage": "binding_failed"
                                     }
+
+                                print(">>> [系统修复] 页面已刷新，正在重新定位 iframe 上下文...")
+                                time.sleep(1)  # 等待渲染
+                                frame_refreshed = False
+
+                                # 重新遍历所有可见 iframe，找到包含特征元素的那个
+                                for frame in tab.eles('tag:iframe'):
+                                    if not frame.states.is_displayed: continue
+                                    # 使用特有的搜索框作为特征来确认是不是目标 frame
+                                    if frame.ele('css:input#txtSearchKey[data-grid="poMtPurTaskGrid"]', timeout=0.5):
+                                        target_frame = frame
+                                        frame_refreshed = True
+                                        print("✅成功重新获取 iframe 对象")
+                                        break
+
+                                if not frame_refreshed:
+                                    print("   ❌ 严重错误：页面刷新后无法找回 iframe，流程终止")
+                                    return  # 找不到就直接停止，防止后面报 'NoneType' 错误
 
                                 print(">>> 一键绑定完成，开始填写码单信息...")
                                 try:

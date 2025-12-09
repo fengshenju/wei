@@ -74,7 +74,13 @@ CONFIG = {
     'style_db_column': '款式编号',
 
     # 月结供应商目录 Excel 文件路径
-    'supplier_db_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/supplier/monthly_suppliers.xlsx',
+    'supplier_db_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/supplier/月结供应商名单.xlsx',
+    
+    # 供应商 Excel 文件中供应商名称的列名（可配置）
+    'supplier_name_column': '供应商简称',  # 默认列名，可根据实际 Excel 表头修改
+    
+    # 供应商 Excel 文件中采购助理的列名（可配置）
+    'supplier_purchaser_column': '采购助理',  # 默认列名，可根据实际 Excel 表头修改
 
     # 物料扣减列表 Excel 文件路径
     'material_deduction_db_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/material/罗卡-素本-单价优惠.xlsx',
@@ -87,6 +93,9 @@ CONFIG = {
     
     # 支持物料扣减的供应商列表（这些供应商的商品会进行价格调整）
     'material_deduction_suppliers': ['发现色彩', '罗卡'],
+
+    #成功处理的图片归档目录
+    'success_archive_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/success_images',
 
     # 图片数据提取的提示词配置
     'prompt_instruction': """
