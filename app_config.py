@@ -43,9 +43,12 @@ CONFIG = {
     # 图片解析开关：是否发图片到大模型解析
     "use_llm_image_parsing": True,  # False时使用硬编码数据，True时正常调用LLM解析
     
+    # 测试模式：是否复用已有JSON文件数据
+    "test_use_existing_json": True,  # True时跳过LLM解析，直接使用已有JSON继续RPA流程
+    
     # 并发控制配置
     "image_parsing_concurrency": 10,  # 大模型图片识别同时并发数
-    "rpa_concurrency": 2,  # RPA操作并发数
+    "rpa_concurrency": 1,  # RPA操作并发数
     "llm_match_max_retries": 3,  # 大模型文本匹配最大重试次数
     "rpa_browser_to_front": True,  # RPA执行时是否将浏览器窗口置前
     

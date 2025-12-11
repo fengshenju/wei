@@ -257,6 +257,19 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
     file_name = os.path.basename(img_path)
     try:
         if db_manager.is_processed(file_name):
+            if CONFIG.get('test_use_existing_json', False):
+                print(f"[测试模式] 复用已有数据: {file_name}")
+                parsed_data = db_manager.load_data(file_name)
+                if parsed_data:
+                    final_style = parsed_data.get('final_selected_style')
+                    return {
+                        'file_name': file_name,
+                        'img_path': img_path,
+                        'success': True,
+                        'parsed_data': parsed_data,
+                        'final_style': final_style,
+                        'failure_reason': parsed_data.get('failure_reason', '')
+                    }
             print(f"[跳过] 文件已处理过: {file_name}")
             return None
 

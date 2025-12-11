@@ -164,9 +164,14 @@ class RPAUtils:
             time.sleep(0.5)
             
             # 5. 在结果表格中查找匹配的单元格
-            # target_td_xpath = f'x://table[@id="{table_id}"]//tbody//tr//td[text()="{search_value}"]'
-            target_td_xpath = f'x://table[@id="{table_id}"]//tbody//tr//td[contains(text(), "{search_value}")]'
-            target_td = scope.ele(target_td_xpath, timeout=timeout)
+            # 优先使用精确匹配，如果没找到再使用包含匹配
+            target_td_xpath_exact = f'x://table[@id="{table_id}"]//tbody//tr//td[text()="{search_value}"]'
+            target_td = scope.ele(target_td_xpath_exact, timeout=timeout)
+            
+            # 如果精确匹配失败，再尝试包含匹配
+            if not target_td:
+                target_td_xpath_contains = f'x://table[@id="{table_id}"]//tbody//tr//td[contains(text(), "{search_value}")]'
+                target_td = scope.ele(target_td_xpath_contains, timeout=timeout)
             
             if target_td:
                 print(f"  -> 找到{item_name} [{search_value}]，执行双击选择...")
@@ -824,13 +829,12 @@ class RPAUtils:
         return False
 
     @staticmethod
-    def fill_details_into_table(scope, structured_tasks):
+    def fill_details_into_table(scope, structured_tasks, parsed_data=None):
         """
         填充物料明细数据到表格
-        [完全还原版] 严格复刻老代码逻辑：
-        1. 单位：优先弹窗(模拟回车搜索+JS双击)，弹窗未出则直接input输入
-        2. 价格/数量：使用JS注入+事件触发
-        3. 日期：模拟Selenium的 removeReadonly + input + 回车
+        [最终增强版]
+        1. 针对前端懒加载问题，实现了【失败自动重试机制】：搜不到->关闭->等待->重开->再搜。
+        2. 保持了强力输入事件触发和双重XPath匹配策略。
         """
         print(f">>> 开始填充物料明细数据，共 {len(structured_tasks)} 条任务...")
         count_success = 0
@@ -861,15 +865,14 @@ class RPAUtils:
                 target_qty = 0.0
                 target_date = ""
 
-                first_item = items[0]
-                raw_unit = first_item.get('unit', '')
-                raw_price = first_item.get('price', 0)
+                raw_unit = items[0].get('unit', '') if items else ''
+                raw_price = items[0].get('price', 0) if items else 0
                 raw_date = task['ocr_context'].get('delivery_date')
 
                 if match_type == 'DIRECT':
                     target_unit = raw_unit
                     target_price = raw_price
-                    target_qty = first_item.get('qty', 0)
+                    target_qty = items[0].get('qty', 0) if items else 0
                     target_date = raw_date
 
                 elif match_type == 'MERGE':
@@ -883,53 +886,94 @@ class RPAUtils:
                 elif match_type == 'SPLIT':
                     target_unit = raw_unit
                     target_price = raw_price
-                    target_qty = first_item.get('qty', 0)
+                    target_qty = items[0].get('qty', 0) if items else 0
                     target_date = raw_date
                     print(f"   ℹ️ [拆分] 记录 {record_id} 强制调整数量为: {target_qty}")
 
-                # --- 3. 执行填入操作 (严格遵照老代码逻辑) ---
+                # --- 3. 执行填入操作 ---
 
-                # A. 填入采购单位 (模拟：点击->搜索->双击)
+                # ============================================================
+                # A. 填入采购单位 (双重尝试 + 懒加载对抗逻辑)
+                # ============================================================
                 if target_unit:
                     inp_unit = tr.ele('css:input[name="unitCalc"]', timeout=0.5)
                     if inp_unit:
-                        # 1. 点击弹出窗口
-                        inp_unit.click()
-                        time.sleep(0.5)  # 等待弹窗动画
 
-                        # 2. 定位弹窗中的搜索框
-                        search_box = scope.ele('#txtMeteringPlusKey', timeout=1)
+                        # --- 定义内部搜索函数，方便重试调用 ---
+                        def execute_unit_search(is_retry=False):
+                            # 1. 点击弹出窗口
+                            inp_unit.click()
+                            # 如果是重试，多等一会(1秒)，给前端加载数据的时间
+                            time.sleep(1.0 if is_retry else 0.5)
 
-                        if search_box and search_box.states.is_displayed:
-                            # 3. 输入单位并回车
+                            # 2. 等待搜索框出现
+                            search_box = scope.wait.ele_displayed('#txtMeteringPlusKey', timeout=2)
+                            if not search_box:
+                                return False
+
+                            # 3. 强力输入序列 (聚焦->清空->逐字输入->触发事件)
+                            search_box.click()
                             search_box.clear()
-                            search_box.input(target_unit)
-                            time.sleep(0.2)
-                            scope.actions.key_down('ENTER').key_up('ENTER')  # 模拟回车键搜索
-                            time.sleep(0.5)  # 给一点点时间让表格刷新
+                            time.sleep(0.1)
+                            for char in target_unit:
+                                search_box.input(char)
+                                time.sleep(0.05)
 
-                            # 4. 在结果表格中找到完全匹配的那一行并双击
-                            target_td_xpath = f'x://table[@id="meteringPlusGrid"]//tbody//tr//td[text()="{target_unit}"]'
-                            target_td = scope.ele(target_td_xpath, timeout=1)
+                            search_box.run_js('this.dispatchEvent(new Event("input", {bubbles:true}));')
+                            search_box.run_js('this.dispatchEvent(new Event("change", {bubbles:true}));')
 
-                            if target_td:
-                                print(f"   -> 找到单位单元格 [{target_unit}]，执行JS双击...")
-                                # 使用老代码的 JS 双击逻辑
-                                js_code = """
-                                        this.click(); 
-                                        this.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true, view: window}));
-                                    """
-                                target_td.run_js(js_code)
-                                time.sleep(0.5)
-                            else:
-                                print(f"   ⚠️ 单位弹窗中未搜索到: {target_unit}")
-                                inp_unit.click()  # 尝试关闭弹窗
+                            # 4. 回车搜索
+                            scope.actions.key_down('ENTER').key_up('ENTER')
+
+                            # 5. 循环检测结果 (3秒)
+                            for _ in range(15):
+                                # 方案1: 精确匹配
+                                target_td = scope.ele(
+                                    f'x://div[@id="unitWin"]//table[@id="meteringPlusGrid"]//tbody//tr//td[normalize-space(text())="{target_unit}"]',
+                                    timeout=0.1)
+                                # 方案2: 包含匹配
+                                if not target_td:
+                                    target_td = scope.ele(
+                                        f'x://div[@id="unitWin"]//table[@id="meteringPlusGrid"]//tbody//tr//td[contains(text(), "{target_unit}")]',
+                                        timeout=0.1)
+
+                                if target_td:
+                                    print(f"   -> [成功] 刷出单位 [{target_unit}]，执行双击...")
+                                    js_code = "this.click(); this.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true, view: window}));"
+                                    target_td.run_js(js_code)
+                                    time.sleep(0.5)
+                                    return True
+
+                                time.sleep(0.2)
+
+                            # 没搜到，关闭弹窗，准备可能的重试
+                            inp_unit.click()
+                            return False
+
+                        # --- 执行逻辑 ---
+
+                        # 第一次尝试
+                        if execute_unit_search(is_retry=False):
+                            pass  # 成功
                         else:
-                            # 如果弹窗没出来，尝试直接输入(兜底)
-                            print("   ⚠️ 单位选择弹窗未出现，尝试直接输入")
-                            inp_unit.input(target_unit, clear=True)
+                            # 失败了，很有可能是因为第一次打开时数据在异步加载
+                            print(f"   ⚠️ 第一次搜索未找到，尝试等待数据加载后重试...")
+                            time.sleep(1.0)  # 这里是关键：关掉弹窗，等1秒让缓存生效
 
-                # B. 填入含税单价 (老代码使用 JS 注入)
+                            # 第二次尝试 (Retry)
+                            if execute_unit_search(is_retry=True):
+                                print(f"   ✅ 重试搜索成功！")
+                            else:
+                                print(f"❌ 最终失败: 两次尝试均未找到单位 [{target_unit}]")
+                                if parsed_data:
+                                    parsed_data['processing_failed'] = True
+                                    parsed_data['failure_reason'] = f"系统无此单位: {target_unit}"
+                                    parsed_data['failure_stage'] = 'unit_search_failed'
+                                return  # 停止后续操作
+
+                # ============================================================
+                # B. 填入含税单价
+                # ============================================================
                 if target_price is not None:
                     inp_price = tr.ele('css:input[name="Price"]', timeout=0.2)
                     if inp_price:
@@ -938,7 +982,9 @@ class RPAUtils:
                         inp_price.run_js(js)
                         time.sleep(0.1)
 
-                # C. 填入数量 (老代码使用 JS 注入)
+                # ============================================================
+                # C. 填入数量
+                # ============================================================
                 if target_qty is not None:
                     inp_qty = tr.ele('css:input[name="Qty"]', timeout=0.2)
                     if inp_qty:
@@ -947,47 +993,42 @@ class RPAUtils:
                         inp_qty.run_js(js)
                         time.sleep(0.1)
 
-                # D. 触发总价计算 (点击 totalAmount)
+                # ============================================================
+                # D. 触发总价计算
+                # ============================================================
                 inp_total = tr.ele('css:input[name="totalAmount"]', timeout=0.2)
                 if inp_total:
                     inp_total.click()
                     time.sleep(0.2)
 
-                # E. 填入交付日期 (老代码使用 input 模拟)
+                # ============================================================
+                # E. 填入交付日期
+                # ============================================================
                 if target_date and target_date.strip():
                     inp_date = tr.ele('css:input.deliveryDate', timeout=0.5)
 
                     if inp_date:
                         try:
                             print(f"   -> 正在填入日期: {target_date}")
-
-                            # 1. 移除 readonly
                             inp_date.run_js('this.removeAttribute("readonly");')
-
-                            # 2. 清空并输入
                             inp_date.clear()
                             time.sleep(0.1)
                             inp_date.input(target_date)
                             time.sleep(0.2)
-
-                            # 3. 模拟回车 (关键)
                             scope.actions.key_down('ENTER').key_up('ENTER')
                             time.sleep(0.2)
-
-                            # 4. 强制失焦
                             scope.run_js('document.body.click();')
-                            inp_date.click()  # 重新点击一下确保焦点状态正常
+                            inp_date.click()
                             time.sleep(0.2)
                         except Exception as e:
                             print(f"   ⚠️ 日期输入异常: {e}")
-                            # 兜底
                             try:
                                 inp_date.run_js(f'this.removeAttribute("readonly"); this.value="{target_date}";')
                             except:
                                 pass
 
                 count_success += 1
-                time.sleep(0.1)  # 防抖
+                time.sleep(0.1)
 
             except Exception as e:
                 print(f"   !!! 填充行数据失败 (Record: {task.get('record', {}).get('Id')}): {e}")

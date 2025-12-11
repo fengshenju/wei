@@ -116,6 +116,15 @@ class RPAExecutor:
 
                         if not records:
                             print("⚠️ 警告: 搜索结果为空，无需匹配。")
+                            # 创建失败状态的match_result
+                            match_result = {
+                                'status': 'fail',
+                                'reason': '款号搜索结果为空',
+                                'global_reason': f'在物料采购需求中搜索款号 [{input_value}] 无结果'
+                            }
+                            match_prompt = f"搜索款号: {input_value}"
+                            # 立即返回，不执行后续操作
+                            return match_prompt, match_result, original_records, retry_count
                         else:
                             original_records = records
                             # 搜索返回的值与 ocr 识别到的码单信息发给大模型进行匹配
@@ -260,22 +269,34 @@ class RPAExecutor:
                                     ocr_date = data_json.get('delivery_date', '')
                                     if ocr_date:
                                         print(f">>> 正在查找并填写码单日期: {ocr_date} ...")
-                                        att01_filled = False
+                                        att01_filled_count = 0
                                         for scope in current_scopes:
                                             try:
-                                                if RPAUtils.fill_date_input(scope, '#Att01', ocr_date, 
-                                                                        remove_readonly=False, trigger_events=True,
-                                                                        scroll_to_see=True, timeout=0.5):
-                                                    print("✅ 成功填写码单日期")
-                                                    att01_filled = True
-                                                    break
+                                                rows = scope.eles('css:table tbody tr', timeout=0.5)
+                                                for row in rows:
+                                                    if not row.states.is_displayed:
+                                                        continue
+                                                    att01_input = row.ele('css:input[id*="Att01"], css:input.Att01', timeout=0.2)
+                                                    if att01_input and att01_input.states.is_displayed:
+                                                        if RPAUtils.fill_date_input(row, att01_input.tag, ocr_date,
+                                                                                remove_readonly=False, trigger_events=True,
+                                                                                scroll_to_see=True, timeout=0.2):
+                                                            att01_filled_count += 1
                                             except Exception:
                                                 continue
-                                        if not att01_filled:
-                                            print("⚠️ 未找到码单日期输入框 (#Att01)")
+                                        if att01_filled_count > 0:
+                                            print(f"✅ 成功填写 {att01_filled_count} 条记录的码单日期")
+                                        else:
+                                            print("⚠️ 未找到码单日期输入框")
 
 
-                                    RPAUtils.fill_details_into_table(scope, structured_tasks)
+                                    RPAUtils.fill_details_into_table(scope, structured_tasks, data_json)
+
+                                    # 检查采购单位搜索是否失败
+                                    if data_json.get('processing_failed', False):
+                                        failure_msg = data_json.get('failure_reason', 'RPA处理失败')
+                                        print(f"!!! 采购单位处理失败: {failure_msg}，停止后续RPA操作")
+                                        return match_prompt, match_result, original_records, retry_count
 
                                     # 提取物料采购单总金额
                                     print(">>> 表格填写完毕，正在提取物料采购单总金额...")
@@ -624,14 +645,26 @@ class RPAExecutor:
             time.sleep(2)
             print(f">>> 正在查找搜索框 (data-grid='poMtPurTaskGrid')...")
             
-            search_input_task, target_frame = RPAUtils.find_element_in_iframes(
-                tab=tab,
-                selector='css:input#txtSearchKey[data-grid="poMtPurTaskGrid"]',
-                max_retries=10,
-                retry_interval=0.5,
-                timeout=0.2,
-                return_frame=True
-            )
+            search_input_task = None
+            target_frame = None  # 记录当前操作的iframe
+
+            # 循环遍历 iframe 查找 (防止加载延迟)
+            for _ in range(10):
+                for frame in tab.eles('tag:iframe'):
+                    if not frame.states.is_displayed:
+                        continue
+
+                    # 精确查找
+                    ele = frame.ele('css:input#txtSearchKey[data-grid="poMtPurTaskGrid"]', timeout=0.2)
+
+                    if ele and ele.states.is_displayed:
+                        search_input_task = ele
+                        target_frame = frame  # 锁定iframe
+                        break
+
+                if search_input_task:
+                    break
+                time.sleep(0.5)
 
             if search_input_task:
                 print(f">>> 找到搜索框，正在输入: {order_code}")
@@ -657,6 +690,66 @@ class RPAExecutor:
                             table_selector='css:table#poMtPurTaskGrid tbody tr',
                             label="首次勾选"
                         )
+                        
+                        print(">>> 开始填写码单信息...")
+                        try:
+                            # 重新验证并获取target_frame（防止页面刷新导致iframe失效）
+                            print(">>> 重新验证iframe上下文...")
+                            verified_frame = None
+                            for frame in tab.eles('tag:iframe'):
+                                if not frame.states.is_displayed: continue
+                                # 使用表格元素验证iframe，避免激活搜索框
+                                if frame.ele('css:table#poMtPurTaskGrid', timeout=0.5):
+                                    verified_frame = frame
+                                    break
+                            
+                            if verified_frame:
+                                target_frame = verified_frame
+                                print(">>> ✅ iframe上下文验证成功，继续使用更新后的frame")
+                            else:
+                                print(">>> ⚠️ iframe验证失败，继续使用原frame")
+                            
+                            rows = target_frame.eles('css:table#poMtPurTaskGrid tbody tr', timeout=3)
+                            for row in rows:
+                                if not row.states.is_displayed: continue
+                                try:
+                                    row.scroll.to_see()
+                                    if delivery_order_no:
+                                        inp_no = row.ele('css:input.Att01', timeout=0.2)
+                                        if inp_no:
+                                            js_no = f'this.value = "{delivery_order_no}"; this.dispatchEvent(new Event("input")); this.dispatchEvent(new Event("blur"));'
+                                            inp_no.run_js(js_no)
+                                    if delivery_date:
+                                        RPAUtils.fill_date_input(
+                                            scope=row,  # 传入行元素
+                                            selector='css:input.Att02',
+                                            date_value=delivery_date,
+                                            remove_readonly=True,
+                                            use_enter_key=True,  # 必须为 True
+                                            click_body_after=False,  # 避免中间失焦导致数据清空
+                                            timeout=0.5
+                                        )
+                                except:
+                                    pass
+                            print(f"✅ 码单信息填写完成")
+                        except Exception as e:
+                            print(f"!!! 填写信息异常: {e}")
+
+                        print(">>> 准备点击\"提交\"...")
+                        try:
+                            btn_submit = target_frame.ele('#btnSubmitTasks', timeout=2)
+                            if btn_submit:
+                                btn_submit.click()
+                                RPAUtils.handle_alert_confirmation(tab, timeout=3)
+                                time.sleep(1)
+                                RPAUtils.handle_alert_confirmation(tab, timeout=2)
+                                print("   ✅ \"提交\"操作结束")
+                                time.sleep(2)
+                            else:
+                                print("⚠️ 未找到\"提交\"按钮")
+                        except Exception as e:
+                            print(f"!!! 提交操作异常: {e}")
+                        
                         print(">>> [1/3] 准备点击\"一键绑定加工单\"...")
                         try:
                             btn_bind = target_frame.ele('#btnOneKeyBindPM', timeout=2)
@@ -677,20 +770,20 @@ class RPAExecutor:
                                 max_wait_time = 30  # 最大等待30秒
                                 check_interval = 2  # 每2秒检查一次
                                 
-                                # 先获取总的记录行数
+                                # 先获取总的记录行数（排除过滤行）
                                 try:
-                                    total_rows = target_frame.eles('css:table#poMtPurTaskGrid tbody tr', timeout=2)
+                                    total_rows = target_frame.eles('css:table#poMtPurTaskGrid tbody tr:not([data-type="filter"])', timeout=2)
                                     visible_rows = [row for row in total_rows if row.states.is_displayed]
                                     total_count = len(visible_rows)
-                                    print(f"   -> 检测到 {total_count} 行记录需要处理")
+                                    print(f"   -> 检测到 {total_count} 行记录需要处理（已排除过滤行）")
                                 except:
                                     total_count = 1  # 兜底，至少有1行
                                     print("   -> 无法获取行数，默认为1行")
                                 
                                 for attempt in range(max_wait_time // check_interval):
                                     try:
-                                        # 必须重新从 iframe 获取元素，因为页面刷新了
-                                        total_rows = target_frame.eles('css:table#poMtPurTaskGrid tbody tr', timeout=2)
+                                        # 必须重新从 iframe 获取元素，因为页面刷新了（排除过滤行）
+                                        total_rows = target_frame.eles('css:table#poMtPurTaskGrid tbody tr:not([data-type="filter"])', timeout=2)
                                         visible_rows = [r for r in total_rows if r.states.is_displayed]
                                         total_count = len(visible_rows)
                                         if total_count == 0:
@@ -698,10 +791,11 @@ class RPAExecutor:
                                             time.sleep(check_interval)
                                             continue
 
-                                        factory_cells = target_frame.eles('css:td[masking="SpName"]', timeout=1)
+                                        # 只检测数据行的加工厂字段（排除过滤行）
                                         completed_count = 0
-                                        for cell in factory_cells:
-                                            if cell.states.is_displayed and cell.text.strip():
+                                        for row in visible_rows:
+                                            factory_cell = row.ele('css:td[masking="SpName"]', timeout=0.1)
+                                            if factory_cell and factory_cell.states.is_displayed and factory_cell.text.strip():
                                                 completed_count += 1
 
                                         if completed_count >= total_count and total_count > 0:
@@ -734,8 +828,8 @@ class RPAExecutor:
                                 # 重新遍历所有可见 iframe，找到包含特征元素的那个
                                 for frame in tab.eles('tag:iframe'):
                                     if not frame.states.is_displayed: continue
-                                    # 使用特有的搜索框作为特征来确认是不是目标 frame
-                                    if frame.ele('css:input#txtSearchKey[data-grid="poMtPurTaskGrid"]', timeout=0.5):
+                                    # 使用表格元素作为特征来确认是不是目标 frame，避免激活搜索框
+                                    if frame.ele('css:table#poMtPurTaskGrid', timeout=0.5):
                                         target_frame = frame
                                         frame_refreshed = True
                                         print("✅成功重新获取 iframe 对象")
@@ -745,50 +839,7 @@ class RPAExecutor:
                                     print("   ❌ 严重错误：页面刷新后无法找回 iframe，流程终止")
                                     return  # 找不到就直接停止，防止后面报 'NoneType' 错误
 
-                                print(">>> 一键绑定完成，开始填写码单信息...")
-                                try:
-                                    # 重新验证并获取target_frame（防止页面刷新导致iframe失效）
-                                    print(">>> 重新验证iframe上下文...")
-                                    current_frame = RPAUtils.find_element_in_iframes(
-                                        tab=tab,
-                                        selector='css:input#txtSearchKey[data-grid="poMtPurTaskGrid"]',
-                                        max_retries=3,
-                                        retry_interval=1,
-                                        timeout=0.5,
-                                        return_frame=True
-                                    )
-                                    if current_frame and len(current_frame) == 2:
-                                        _, verified_frame = current_frame
-                                        target_frame = verified_frame
-                                        print(">>> ✅ iframe上下文验证成功，继续使用更新后的frame")
-                                    else:
-                                        print(">>> ⚠️ iframe验证失败，继续使用原frame")
-                                    
-                                    rows = target_frame.eles('css:table#poMtPurTaskGrid tbody tr', timeout=3)
-                                    for row in rows:
-                                        if not row.states.is_displayed: continue
-                                        try:
-                                            row.scroll.to_see()
-                                            if delivery_order_no:
-                                                inp_no = row.ele('css:input.Att01', timeout=0.2)
-                                                if inp_no:
-                                                    js_no = f'this.value = "{delivery_order_no}"; this.dispatchEvent(new Event("input")); this.dispatchEvent(new Event("blur"));'
-                                                    inp_no.run_js(js_no)
-                                            if delivery_date:
-                                                RPAUtils.fill_date_input(
-                                                    scope=row,  # 传入行元素
-                                                    selector='css:input.Att02',
-                                                    date_value=delivery_date,
-                                                    remove_readonly=True,
-                                                    use_enter_key=True,  # 必须为 True
-                                                    click_body_after=True,  # 必须为 True
-                                                    timeout=0.5
-                                                )
-                                        except:
-                                            pass
-                                    print(f"✅ 码单信息填写完成")
-                                except Exception as e:
-                                    print(f"!!! 填写信息异常: {e}")
+                                print(">>> 一键绑定完成")
                             else:
                                 print("⚠️ 未找到一键绑定加工单按钮")
                         except Exception as e:
@@ -799,16 +850,14 @@ class RPAExecutor:
                         
                         # 在提交前再次验证iframe有效性
                         print(">>> 提交前验证iframe上下文...")
-                        submit_frame = RPAUtils.find_element_in_iframes(
-                            tab=tab,
-                            selector='css:table#poMtPurTaskGrid',
-                            max_retries=3,
-                            retry_interval=1,
-                            timeout=0.5,
-                            return_frame=True
-                        )
-                        if submit_frame and len(submit_frame) == 2:
-                            _, verified_frame = submit_frame
+                        verified_frame = None
+                        for frame in tab.eles('tag:iframe'):
+                            if not frame.states.is_displayed: continue
+                            if frame.ele('css:table#poMtPurTaskGrid', timeout=0.5):
+                                verified_frame = frame
+                                break
+                        
+                        if verified_frame:
                             target_frame = verified_frame
                             print(">>> ✅ 提交前iframe验证成功")
                         else:
@@ -821,35 +870,18 @@ class RPAExecutor:
                         )
                         print(f"✅ 已确认勾选 {reselect_count} 行")
 
-                        print(">>> [2/3] 准备点击\"提交\"...")
-                        try:
-                            btn_submit = target_frame.ele('#btnSubmitTasks', timeout=2)
-                            if btn_submit:
-                                btn_submit.click()
-                                RPAUtils.handle_alert_confirmation(tab, timeout=3)
-                                time.sleep(1)
-                                RPAUtils.handle_alert_confirmation(tab, timeout=2)
-                                print("   ✅ \"提交\"操作结束")
-                                time.sleep(2)
-                            else:
-                                print("⚠️ 未找到\"提交\"按钮")
-                        except Exception as e:
-                            print(f"!!! 提交操作异常: {e}")
-
-                        print(">>> [3/3] 准备点击\"确认\"...")
+                        print(">>> 准备点击\"确认\"...")
                         try:
                             # 确认前再次验证iframe上下文
                             print(">>> 确认前验证iframe上下文...")
-                            confirm_frame = RPAUtils.find_element_in_iframes(
-                                tab=tab,
-                                selector='css:button#btnConfirmToDoTask',
-                                max_retries=3,
-                                retry_interval=1,
-                                timeout=0.5,
-                                return_frame=True
-                            )
-                            if confirm_frame and len(confirm_frame) == 2:
-                                _, verified_frame = confirm_frame
+                            verified_frame = None
+                            for frame in tab.eles('tag:iframe'):
+                                if not frame.states.is_displayed: continue
+                                if frame.ele('css:button#btnConfirmToDoTask', timeout=0.5):
+                                    verified_frame = frame
+                                    break
+                            
+                            if verified_frame:
                                 target_frame = verified_frame
                                 print(">>> ✅ 确认前iframe验证成功")
                             else:
