@@ -604,6 +604,9 @@ async def async_main():
     for ext in ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.PNG']:
         image_files.extend(glob.glob(os.path.join(source_dir, ext)))
 
+    # 去重处理，解决Windows下大小写扩展名重复匹配问题
+    image_files = list(set(image_files))
+
     if not image_files:
         print(f"目录 {source_dir} 下没有找到图片文件。")
         return
