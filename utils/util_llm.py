@@ -490,6 +490,126 @@ def extract_data_from_image_dmx(image_path, prompt_instructions, attempt=0):
         print(f">>> DMX图片分析系统错误: {e}")
         return {"error": str(e), "used_api_key": api_key if 'api_key' in locals() else "N/A"}
 
+
+def extract_data_from_image_gemini(image_path, prompt_instructions, attempt=0):
+    """
+    使用 Google Gemini 原生 API 分析图片并提取数据
+    直接调用 Google Gemini API（不走 DMX 代理）
+
+    :param image_path: 本地图片路径
+    :param prompt_instructions: 指示模型提取什么数据的提示词
+    :param attempt: 重试次数，用于选择不同的API key
+    :return: 解析后的 JSON 数据 (dict) 或 原始文本 (str)
+    """
+    print(f">>> 正在处理图片: {os.path.basename(image_path)}")
+    print(">>> 使用 Google Gemini 原生 API...")
+
+    # 检查 SDK 是否可用
+    if not GENAI_AVAILABLE:
+        print("!!! 错误: google-genai SDK 未安装")
+        return {"error": "google-genai SDK 未安装", "used_api_key": "N/A"}
+
+    try:
+        # 1. 检查图片文件是否存在
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"图片文件不存在: {image_path}")
+
+        # 2. 获取配置信息
+        api_key = get_api_key('gemini_api_key', attempt)
+        model = CONFIG.get('gemini_model', 'gemini-2.0-flash')
+        resolution = CONFIG.get('gemini_image_resolution', 'high')
+        max_tokens = CONFIG.get('gemini_max_tokens', 4000)
+
+        if not api_key:
+            print("!!! 错误: 未配置 gemini_api_key")
+            return {"error": "API Key缺失", "used_api_key": "N/A"}
+
+        print(f">>> 使用模型: {model}")
+        print(f">>> 图片分辨率级别: {resolution}")
+
+        # 3. 读取图片文件（直接读取字节数据，不需要 base64 编码）
+        with open(image_path, 'rb') as f:
+            image_bytes = f.read()
+
+        # 获取 MIME 类型
+        mime_type, _ = mimetypes.guess_type(image_path)
+        if not mime_type:
+            mime_type = 'image/jpeg'  # 默认回退
+
+        print(f">>> 图片 MIME 类型: {mime_type}")
+
+        # 4. 初始化 Gemini 客户端
+        try:
+            client = genai.Client(api_key=api_key)
+        except Exception as init_error:
+            print(f"!!! Gemini 客户端初始化失败: {init_error}")
+            return {"error": f"客户端初始化失败: {str(init_error)}", "used_api_key": api_key}
+
+        # 5. 构造请求内容
+        final_content = f"{prompt_instructions}\n\n请直接返回纯 JSON 格式的数据，不要包含 markdown 标记。"
+
+        # 构造带 media_resolution 的图片 Part
+        media_resolution_value = f"media_resolution_{resolution}"
+        image_part = types.Part(
+            inline_data=types.Blob(
+                mime_type=mime_type,
+                data=image_bytes
+            ),
+            media_resolution={"level": media_resolution_value}
+        )
+
+        # 6. 发起 API 请求
+        print(f">>> 发起 Gemini API 请求...")
+
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(text=final_content),
+                        image_part
+                    ]
+                )
+            ],
+            config=types.GenerateContentConfig(
+                max_output_tokens=max_tokens,
+                temperature=0.1,  # 数据提取需要精确，温度设低
+                response_modalities=["TEXT"]
+            )
+        )
+
+        # 7. 提取响应内容
+        content = response.text.strip()
+        print(f">>> Gemini API 返回成功，内容长度: {len(content)} 字符")
+
+        # 8. 数据清洗与 JSON 解析
+        cleaned_content = content
+        if cleaned_content.startswith("```json"):
+            cleaned_content = cleaned_content[7:]
+        elif cleaned_content.startswith("```"):
+            cleaned_content = cleaned_content[3:]
+
+        if cleaned_content.endswith("```"):
+            cleaned_content = cleaned_content[:-3]
+
+        try:
+            result_json = json.loads(cleaned_content.strip())
+            result_json['used_api_key'] = api_key if api_key else "N/A"
+            return result_json
+        except json.JSONDecodeError:
+            print(">>> 警告: Gemini 返回内容无法解析为 JSON")
+            print(f">>> 原始返回内容: {content[:500]}...")
+            print(f">>> 清理后内容: {cleaned_content[:500]}...")
+            return {"raw_text": content, "used_api_key": api_key}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f">>> Gemini 图片分析系统错误: {e}")
+        return {"error": str(e), "used_api_key": api_key if 'api_key' in locals() else "N/A"}
+
+
 # 测试代码
 if __name__ == "__main__":
     # 假设你有一张测试图片放在同一目录下，或者输入绝对路径

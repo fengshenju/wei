@@ -2190,7 +2190,7 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB):
 
         # 1. 首次解析
         if CONFIG.get('use_llm_image_parsing', True):
-            parsed_data = extract_data_from_image(img_path, current_prompt)
+            parsed_data = extract_data_from_image_dmx(img_path, current_prompt)
         else:
             # 测试桩数据
             parsed_data = {
