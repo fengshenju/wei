@@ -1,17 +1,47 @@
-DrissionPage>=4.0.0
-selenium>=4.0.0
-requests>=2.25.0
-lxml>=4.6.0
-Pillow>=8.0.0
-pandas>=1.3.0
-openpyxl>=3.0.0
-pymongo>=4.0.0
-redis>=4.0.0
-python-dotenv>=0.19.0
-loguru>=0.6.0
-colorama>=0.4.4
-pytest>=6.0.0
-pytest-html>=3.1.0
-pytest-cov>=3.0.0
-litellm>=1.0.0
-pydantic-settings>=2.0.0
+# Python 3.12+ 兼容的依赖包列表
+# 核心网页自动化库
+DrissionPage>=4.0.5
+
+# 数据处理相关
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# AI/LLM 集成
+litellm>=1.50.0
+
+# HTTP 请求
+requests>=2.31.0
+
+# 配置管理  
+pydantic-settings>=2.1.0
+
+# 日志记录
+loguru>=0.7.0
+
+# 系统工具
+pathlib2>=2.3.0
+
+# 开发和测试（可选）
+pytest>=7.4.0
+pytest-html>=3.2.0
+pytest-cov>=4.1.0
+
+# 运行时依赖（通常已内置，但为兼容性列出）
+# datetime - 内置模块
+# json - 内置模块  
+# os - 内置模块
+# time - 内置模块
+# random - 内置模块
+# asyncio - 内置模块
+# concurrent.futures - 内置模块
+# typing - 内置模块
+# pathlib - 内置模块
+# base64 - 内置模块
+# mimetypes - 内置模块
+# csv - 内置模块
+# re - 内置模块
+# sys - 内置模块
+# glob - 内置模块
+# shutil - 内置模块
+# pickle - 内置模块
+# uuid - 内置模块
