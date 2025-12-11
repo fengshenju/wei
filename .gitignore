@@ -86,6 +86,7 @@ chromedriver*
 # Config
 config/local_settings.py
 .env.local
+app_config.py
 
 # 允许上传 data 文件夹及其内容
 # data/ - 已注释，允许上传
