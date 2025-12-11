@@ -1,0 +1,29 @@
+{
+    "delivery_date": "2025-12-04",
+    "buyer_name": "素本-郑辉杰",
+    "supplier_name": "罗卡",
+    "delivery_order_number": "BF-20251204-0646",
+    "style_candidates": [
+        {
+            "text": "T1280W",
+            "is_red": false,
+            "position": "备注栏"
+        }
+    ],
+    "items": [
+        {
+            "qty": 118,
+            "price": 2.9,
+            "unit": "米",
+            "raw_style_text": "1003#超柔舒美绸",
+            "product_description": "194#浅浅米",
+            "original_price": 3.0,
+            "deduction_amount": 0.1,
+            "matched_material": "1003#超柔舒美绸"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "final_selected_style": "T1280W",
+    "retry_count": 1,
+    "price_adjusted": true
+}

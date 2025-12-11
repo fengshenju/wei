@@ -1,0 +1,25 @@
+{
+    "delivery_date": "2025-12-02",
+    "buyer_name": "素本服饰",
+    "supplier_name": "凤香",
+    "delivery_order_number": "CK00293438",
+    "style_candidates": [
+        {
+            "text": "H1320K",
+            "is_red": false,
+            "position": "备注说明"
+        }
+    ],
+    "items": [
+        {
+            "qty": 54,
+            "price": 26,
+            "unit": "米",
+            "raw_style_text": "罗威绒-27#",
+            "product_description": "罗威绒-27#"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "final_selected_style": "H1320K",
+    "retry_count": 1
+}

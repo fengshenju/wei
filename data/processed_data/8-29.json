@@ -1,0 +1,40 @@
+{
+    "delivery_date": "2025-12-03",
+    "buyer_name": "杭州素本服饰有限公司",
+    "supplier_name": "兰搏",
+    "delivery_order_number": "SCCK143454",
+    "style_candidates": [
+        {
+            "text": "H1591A-A",
+            "is_red": false,
+            "position": "表格款号列"
+        }
+    ],
+    "items": [
+        {
+            "qty": 50,
+            "price": 4.2,
+            "unit": "条",
+            "raw_style_text": "H1591A-A 翻单夏凝",
+            "product_description": "5#金属古银Y牙开口 53CM 深灰色 直装平板翘拌(古银)"
+        },
+        {
+            "qty": 30,
+            "price": 4.2,
+            "unit": "条",
+            "raw_style_text": "H1591A-A 翻单夏凝",
+            "product_description": "5#金属古银Y牙开口 54CM 深灰色 直装平板翘拌(古银)"
+        },
+        {
+            "qty": 20,
+            "price": 4.2,
+            "unit": "条",
+            "raw_style_text": "H1591A-A 翻单夏凝",
+            "product_description": "5#金属古银Y牙开口 55CM 深灰色 直装平板翘拌(古银)"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "陈李莉",
+    "final_selected_style": "H1591A-A",
+    "retry_count": 1
+}

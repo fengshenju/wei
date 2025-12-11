@@ -1,0 +1,57 @@
+{
+    "delivery_date": "2025-12-08",
+    "buyer_name": "杭州素本服饰有限公司",
+    "supplier_name": "兰搏",
+    "delivery_order_number": "SCCK143791",
+    "style_candidates": [
+        {
+            "text": "H1687A",
+            "is_red": false,
+            "position": "表格款号列"
+        },
+        {
+            "text": "H1687A翻单衣闻",
+            "is_red": false,
+            "position": "表格款号列"
+        },
+        {
+            "text": "送衣闻",
+            "is_red": true,
+            "position": "顶部手写"
+        }
+    ],
+    "items": [
+        {
+            "qty": 80,
+            "price": 0.75,
+            "unit": "条",
+            "raw_style_text": "H1687A翻单衣闻",
+            "product_description": "3#尼龙闭口 21CM 深灰色 弹簧皮头(镀黑镍)"
+        },
+        {
+            "qty": 70,
+            "price": 0.75,
+            "unit": "条",
+            "raw_style_text": "H1687A翻单衣闻",
+            "product_description": "3#尼龙闭口 22CM 深灰色 弹簧皮头(镀黑镍)"
+        },
+        {
+            "qty": 40,
+            "price": 0.75,
+            "unit": "条",
+            "raw_style_text": "H1687A翻单衣闻",
+            "product_description": "3#尼龙闭口 23CM 深灰色 弹簧皮头(镀黑镍)"
+        },
+        {
+            "qty": 10,
+            "price": 0.75,
+            "unit": "条",
+            "raw_style_text": "H1687A翻单衣闻",
+            "product_description": "3#尼龙闭口 24CM 深灰色 弹簧皮头(镀黑镍)"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "陈李莉",
+    "final_selected_style": "H1687A",
+    "retry_count": 1
+}

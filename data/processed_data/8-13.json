@@ -1,0 +1,26 @@
+{
+    "delivery_date": "2025-12-03",
+    "buyer_name": "素本",
+    "supplier_name": "金致",
+    "delivery_order_number": "XS202512080017",
+    "style_candidates": [
+        {
+            "text": "T1367W",
+            "is_red": false,
+            "position": "表格-客户货号列"
+        }
+    ],
+    "items": [
+        {
+            "qty": 2,
+            "price": 15,
+            "unit": "包",
+            "raw_style_text": "T1367W",
+            "product_description": "透明备扣 16# 品尚汇"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "邓佳欣",
+    "final_selected_style": "T1367W",
+    "retry_count": 1
+}

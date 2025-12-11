@@ -1,0 +1,26 @@
+{
+    "delivery_date": "2025-12-06",
+    "buyer_name": "杭州素本服饰有限公司",
+    "supplier_name": "兰搏",
+    "delivery_order_number": "SCCK143707",
+    "style_candidates": [
+        {
+            "text": "H1499Q",
+            "is_red": false,
+            "position": "表格款号列"
+        }
+    ],
+    "items": [
+        {
+            "qty": 100,
+            "price": 0.3,
+            "unit": "条",
+            "raw_style_text": "H1499Q 翻单",
+            "product_description": "3#丝边隐形闭口 木下之上 25CM 咖 水滴头(喷漆)"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "陈李莉",
+    "final_selected_style": "H1499Q",
+    "retry_count": 1
+}

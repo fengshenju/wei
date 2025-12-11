@@ -1,0 +1,9 @@
+{
+  "supplier_list": [],
+  "purchaser_mapping": {},
+  "cache_time": 1765185662.518416,
+  "source_excel": "/Users/fengshenju/Downloads/program/pythonProjects/wei/data/supplier/月结供应商名单.xlsx",
+  "supplier_column": "不存在的列名",
+  "purchaser_column": "也不存在的列名",
+  "data_format": "dict"
+}

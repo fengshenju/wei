@@ -1,0 +1,30 @@
+{
+    "delivery_date": "2025-12-05",
+    "buyer_name": "素本-郑辉杰",
+    "supplier_name": "罗卡",
+    "delivery_order_number": "BF-20251205-0632",
+    "style_candidates": [
+        {
+            "text": "H1702W",
+            "is_red": false,
+            "position": "底部备注栏"
+        }
+    ],
+    "items": [
+        {
+            "qty": 31,
+            "price": 2.9,
+            "unit": "米",
+            "raw_style_text": "1003#超柔舒美绸",
+            "product_description": "165#淡黄色",
+            "original_price": 3.0,
+            "deduction_amount": 0.1,
+            "matched_material": "1003#超柔舒美绸"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "邓佳欣",
+    "final_selected_style": "H1702W",
+    "retry_count": 1,
+    "price_adjusted": true
+}

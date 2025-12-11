@@ -1,0 +1,40 @@
+{
+    "delivery_date": "2025-12-02",
+    "buyer_name": "素本服饰",
+    "supplier_name": "广丰源布行",
+    "delivery_order_number": "CK00062096",
+    "style_candidates": [
+        {
+            "text": "T1368C",
+            "is_red": false,
+            "position": "底部备注栏"
+        }
+    ],
+    "items": [
+        {
+            "qty": 56.2,
+            "price": 43,
+            "unit": "公斤",
+            "raw_style_text": "06889#",
+            "product_description": "抓毛-米白"
+        },
+        {
+            "qty": 58.1,
+            "price": 47,
+            "unit": "公斤",
+            "raw_style_text": "06889#",
+            "product_description": "抓毛-活性黑"
+        },
+        {
+            "qty": 57,
+            "price": 45,
+            "unit": "公斤",
+            "raw_style_text": "06889#",
+            "product_description": "抓毛-103#花灰"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "final_selected_style": "T1368C",
+    "used_dmx_for_date_check": true,
+    "retry_count": 1
+}

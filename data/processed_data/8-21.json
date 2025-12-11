@@ -1,0 +1,26 @@
+{
+    "delivery_date": "2025-12-04",
+    "buyer_name": "杭州素本服饰有限公司",
+    "supplier_name": "兰搏",
+    "delivery_order_number": "SCCK143481",
+    "style_candidates": [
+        {
+            "text": "H1320K",
+            "is_red": false,
+            "position": "表格明细-款号列"
+        }
+    ],
+    "items": [
+        {
+            "qty": 100,
+            "price": 1.2,
+            "unit": "条",
+            "raw_style_text": "H1320K 翻单 木下之上",
+            "product_description": "3#金属白金Y牙闭口 规格:9CM 颜色:深灰 拉头:弹簧头(挂白)"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "陈李莉",
+    "final_selected_style": "H1320K",
+    "retry_count": 1
+}

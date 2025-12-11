@@ -1,0 +1,33 @@
+{
+    "delivery_date": "2025-12-05",
+    "buyer_name": "素本",
+    "supplier_name": "金致",
+    "delivery_order_number": "XS202512080023",
+    "style_candidates": [
+        {
+            "text": "H1290Q",
+            "is_red": false,
+            "position": "表格-客户货号列"
+        }
+    ],
+    "items": [
+        {
+            "qty": 200,
+            "price": 0.19,
+            "unit": "颗",
+            "raw_style_text": "H1290Q",
+            "product_description": "花边咖啡亮光边哑光内里平面树脂扣 28# 梦颜"
+        },
+        {
+            "qty": 1450,
+            "price": 0.15,
+            "unit": "套",
+            "raw_style_text": "H1290Q",
+            "product_description": "青铜草帽钉 0.75cm"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "邓佳欣",
+    "final_selected_style": "H1290Q",
+    "retry_count": 1
+}

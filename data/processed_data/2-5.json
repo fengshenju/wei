@@ -1,0 +1,26 @@
+{
+    "delivery_date": "2025-12-02",
+    "buyer_name": "素本-夏凝",
+    "supplier_name": "金致",
+    "delivery_order_number": "XS202512020027",
+    "style_candidates": [
+        {
+            "text": "H1591A-A",
+            "is_red": false,
+            "position": "表格-客户货号"
+        }
+    ],
+    "items": [
+        {
+            "qty": 6,
+            "price": 15,
+            "unit": "包",
+            "raw_style_text": "H1591A-A",
+            "product_description": "透明备扣 16#"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "final_selected_style": "H1591A-A",
+    "used_dmx_for_date_check": true,
+    "retry_count": 1
+}

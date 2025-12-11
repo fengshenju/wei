@@ -61,19 +61,19 @@ venv.bak/
 logs/
 *.log
 
-# Data
-data/
+# Data - 允许上传 data 文件夹，但排除部分大文件
+# data/ - 注释掉，允许上传 data 文件夹
 downloads/
-*.csv
-*.xlsx
-*.json
-*.pickle
+# *.csv - 注释掉，允许上传 CSV 文件
+# *.xlsx - 注释掉，允许上传 Excel 文件  
+# *.json - 注释掉，允许上传 JSON 文件
+# *.pickle - 注释掉，允许上传 pickle 文件
 
-# Screenshots
+# Screenshots - 允许上传图片文件
 screenshots/
-*.png
-*.jpg
-*.jpeg
+# *.png - 注释掉，允许上传 PNG 文件
+# *.jpg - 注释掉，允许上传 JPG 文件 
+# *.jpeg - 注释掉，允许上传 JPEG 文件
 
 # OS
 .DS_Store
@@ -87,5 +87,5 @@ chromedriver*
 config/local_settings.py
 .env.local
 
-# 忽略 data 文件夹及其所有内容
-data/
+# 允许上传 data 文件夹及其内容
+# data/ - 已注释，允许上传

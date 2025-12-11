@@ -1,0 +1,30 @@
+{
+    "delivery_date": "2025-12-05",
+    "buyer_name": "素本-郑辉杰",
+    "supplier_name": "罗卡",
+    "delivery_order_number": "BF-20251205-0673",
+    "style_candidates": [
+        {
+            "text": "H1582A-A",
+            "is_red": false,
+            "position": "底部备注栏"
+        }
+    ],
+    "items": [
+        {
+            "qty": 100,
+            "price": 4.0,
+            "unit": "米",
+            "raw_style_text": "1011#",
+            "product_description": "1011#韩国精品里布-2#黑色",
+            "original_price": 4.2,
+            "deduction_amount": 0.2,
+            "matched_material": "1011#韩国精品里布"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "邓佳欣",
+    "final_selected_style": "H1582A-A",
+    "retry_count": 1,
+    "price_adjusted": true
+}

@@ -1,0 +1,40 @@
+{
+    "delivery_date": "2025-12-06",
+    "buyer_name": "素本服饰",
+    "supplier_name": "广丰源布行",
+    "delivery_order_number": "CK00062180",
+    "style_candidates": [
+        {
+            "text": "H1715C",
+            "is_red": false,
+            "position": "底部备注栏"
+        }
+    ],
+    "items": [
+        {
+            "qty": 28.8,
+            "price": 42,
+            "unit": "公斤",
+            "raw_style_text": "3498-00#",
+            "product_description": "3#白"
+        },
+        {
+            "qty": 28.4,
+            "price": 44,
+            "unit": "公斤",
+            "raw_style_text": "3498-00#",
+            "product_description": "226#蓝"
+        },
+        {
+            "qty": 30.3,
+            "price": 46,
+            "unit": "公斤",
+            "raw_style_text": "3498-00#",
+            "product_description": "139#活性黑"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "苟钰",
+    "final_selected_style": "H1715C",
+    "retry_count": 1
+}

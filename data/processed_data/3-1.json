@@ -1,0 +1,25 @@
+{
+    "delivery_date": "2025-12-01",
+    "buyer_name": "杭州素本服饰有限公司",
+    "supplier_name": "浙江兰搏拉链有限公司",
+    "delivery_order_number": "SCCK143301",
+    "style_candidates": [
+        {
+            "text": "HJ643C",
+            "is_red": false,
+            "position": "表格内"
+        }
+    ],
+    "items": [
+        {
+            "qty": 100,
+            "price": 0.4,
+            "unit": "条",
+            "raw_style_text": "HJ643C 翻单 凯盛",
+            "product_description": "3#丝边隐形闭口 40CM 奶白色 水滴头(喷漆)"
+        }
+    ],
+    "final_selected_style": "H1643C",
+    "dmx_recheck_failed": true,
+    "retry_count": 1
+}

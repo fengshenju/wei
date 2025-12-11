@@ -1,0 +1,26 @@
+{
+    "delivery_date": "2025-12-05",
+    "buyer_name": "素本-郑辉杰",
+    "supplier_name": "罗卡",
+    "delivery_order_number": "BF-20251205-0576",
+    "style_candidates": [
+        {
+            "text": "H1694W",
+            "is_red": false,
+            "position": "备注栏"
+        }
+    ],
+    "items": [
+        {
+            "qty": 108,
+            "price": 7.5,
+            "unit": "米",
+            "raw_style_text": "1012*韩国精品人丝平纹",
+            "product_description": "1012*韩国精品人丝平纹-2#黑色"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "邓佳欣",
+    "final_selected_style": "H1694W",
+    "retry_count": 1
+}

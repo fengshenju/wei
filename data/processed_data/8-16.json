@@ -1,0 +1,33 @@
+{
+    "delivery_date": "2025-12-05",
+    "buyer_name": "素本",
+    "supplier_name": "金致",
+    "delivery_order_number": "XS202512080020",
+    "style_candidates": [
+        {
+            "text": "H1713W",
+            "is_red": false,
+            "position": "表格-客户货号列"
+        }
+    ],
+    "items": [
+        {
+            "qty": 810,
+            "price": 0.58,
+            "unit": "颗",
+            "raw_style_text": "H1713W",
+            "product_description": "船锚弧面枪色合金封釉手缝扣 2.2cm 备注:梦颜"
+        },
+        {
+            "qty": 1,
+            "price": 15,
+            "unit": "包",
+            "raw_style_text": "H1713W",
+            "product_description": "透明备扣 16#"
+        }
+    ],
+    "used_api_key": "sk-Rr9CXIyBuc4sq9mpEyaN8l3WhVYB8P1TpahojO1HT1bozO4B",
+    "purchaser": "邓佳欣",
+    "final_selected_style": "H1713W",
+    "retry_count": 1
+}
