@@ -43,7 +43,7 @@ class RPAExecutor:
                 print(f"[{file_name}] 正在激活浏览器窗口...")
                 tab.set.window.normal()
                 time.sleep(0.5)
-                tab.set.window.full()
+                # tab.set.window.full()
             else:
                 print(f"[{file_name}] 跳过浏览器窗口激活")
 
