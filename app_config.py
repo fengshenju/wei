@@ -63,21 +63,21 @@ CONFIG = {
     "base_url": "https://a1.scm321.com/Admin/Dashboard",
 
     # 待处理图片的本地文件夹路径 (请修改为您实际的图片文件夹)
-    'image_source_dir': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/images',
+    'image_source_dir': r'E:\pyprojects\wei\data\images',
 
-    'data_storage_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/processed_data',
+    'data_storage_path': r'E:\pyprojects\wei\data',
 
     # HTML报告输出路径
-    'report_output_path': r'/Users/fengshenju/Desktop/data',
+    'report_output_path': r'E:\pyprojects\wei\data\report',
 
-    # Excel 文件的绝对路径
-    'style_db_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/style/kuanhaochi.xlsx',
+    # 款号池的绝对路径
+    'style_db_path': r'E:\pyprojects\wei\data\style\kuanhaochi.xlsx',
 
     # Excel 中存储款号的那一列的表头名称
     'style_db_column': '款式编号',
 
     # 月结供应商目录 Excel 文件路径
-    'supplier_db_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/supplier/月结供应商名单.xlsx',
+    'supplier_db_path': r'E:\pyprojects\wei\data\supplier\月结供应商名单.xlsx',
     
     # 供应商 Excel 文件中供应商名称的列名（可配置）
     'supplier_name_column': '供应商简称',  # 默认列名，可根据实际 Excel 表头修改
@@ -85,8 +85,8 @@ CONFIG = {
     # 供应商 Excel 文件中采购助理的列名（可配置）
     'supplier_purchaser_column': '采购助理',  # 默认列名，可根据实际 Excel 表头修改
 
-    # 物料扣减列表 Excel 文件路径
-    'material_deduction_db_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/material/罗卡-素本-单价优惠.xlsx',
+    # 优惠厂商excel列表
+    'material_deduction_db_path': r'E:\pyprojects\wei\data\material\罗卡-素本-单价优惠.xlsx',
 
     # 物料扣减列表 Excel 中存储物料名称的那一列的表头名称
     'material_deduction_name_column': '品名',
@@ -98,7 +98,7 @@ CONFIG = {
     'material_deduction_suppliers': ['发现色彩', '罗卡'],
 
     #成功处理的图片归档目录
-    'success_archive_path': r'/Users/fengshenju/Downloads/program/pythonProjects/wei/data/success_images',
+    'success_archive_path': r'E:\pyprojects\wei\data\success_images',
 
     # 图片数据提取的提示词配置
     'prompt_instruction': """
