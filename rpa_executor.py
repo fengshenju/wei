@@ -272,16 +272,13 @@ class RPAExecutor:
                                         att01_filled_count = 0
                                         for scope in current_scopes:
                                             try:
-                                                rows = scope.eles('css:table tbody tr', timeout=0.5)
-                                                for row in rows:
-                                                    if not row.states.is_displayed:
-                                                        continue
-                                                    att01_input = row.ele('css:input[id*="Att01"], css:input.Att01', timeout=0.2)
-                                                    if att01_input and att01_input.states.is_displayed:
-                                                        if RPAUtils.fill_date_input(row, att01_input.tag, ocr_date,
-                                                                                remove_readonly=False, trigger_events=True,
-                                                                                scroll_to_see=True, timeout=0.2):
-                                                            att01_filled_count += 1
+                                                # 直接在scope中查找，不限制在表格行内
+                                                att01_input = scope.ele('#Att01', timeout=0.5)
+                                                if att01_input and att01_input.states.is_displayed:
+                                                    if RPAUtils.fill_date_input(scope, '#Att01', ocr_date,
+                                                                            remove_readonly=True, trigger_events=True,
+                                                                            scroll_to_see=True, timeout=0.5):
+                                                        att01_filled_count += 1
                                             except Exception:
                                                 continue
                                         if att01_filled_count > 0:
