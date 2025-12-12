@@ -15,7 +15,7 @@ try:
     from app_config import CONFIG
     from utils.data_manager import DataManager, load_style_db_with_cache, load_supplier_db_with_cache, load_material_deduction_db_with_cache, apply_material_deduction
     from utils.report_generator import collect_result_data, update_html_report
-    from utils.util_llm import extract_data_from_image, extract_data_from_image_dmx
+    from utils.util_llm import extract_data_from_image, extract_data_from_image_dmx,extract_data_from_image_gemini
     from rpa_executor import RPAExecutor  # 导入拆分后的执行器
 except ImportError as e:
     print(f"!!! 导入模块失败: {e}")
@@ -75,42 +75,59 @@ def archive_success_image(img_path, parsed_data):
     except Exception as e:
         print(f"⚠️ [归档失败] {e}")
 
-def should_use_dmx_for_date_check(delivery_date_str):
-    """
-    检查交付日期是否异常，如果与当前日期相差超过阈值天数则返回True
-    """
-    try:
-        if not delivery_date_str: return False
-        if len(delivery_date_str) == 10 and delivery_date_str.count('-') == 2:
-            delivery_date = datetime.datetime.strptime(delivery_date_str, '%Y-%m-%d').date()
-        else:
-            for fmt in ['%Y/%m/%d', '%m/%d/%Y', '%d/%m/%Y', '%Y.%m.%d']:
-                try:
-                    delivery_date = datetime.datetime.strptime(delivery_date_str, fmt).date()
-                    break
-                except ValueError:
-                    continue
-            else:
-                return False
-
-        current_date = datetime.datetime.now().date()
-        date_diff = abs((delivery_date - current_date).days)
-        threshold_days = CONFIG.get('delivery_date_threshold_days', 7)
-
-        if date_diff > threshold_days:
-            print(
-                f">>> 交付日期异常检测: 当前日期 {current_date}, 交付日期 {delivery_date}, 差值 {date_diff} 天 > 阈值 {threshold_days} 天")
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f">>> 交付日期解析失败: {delivery_date_str}, 错误: {e}")
-        return False
+# def should_use_dmx_for_date_check(delivery_date_str):
+#     """
+#     检查交付日期是否异常，如果与当前日期相差超过阈值天数则返回True
+#     """
+#     try:
+#         if not delivery_date_str: return False
+#         if len(delivery_date_str) == 10 and delivery_date_str.count('-') == 2:
+#             delivery_date = datetime.datetime.strptime(delivery_date_str, '%Y-%m-%d').date()
+#         else:
+#             for fmt in ['%Y/%m/%d', '%m/%d/%Y', '%d/%m/%Y', '%Y.%m.%d']:
+#                 try:
+#                     delivery_date = datetime.datetime.strptime(delivery_date_str, fmt).date()
+#                     break
+#                 except ValueError:
+#                     continue
+#             else:
+#                 return False
+#
+#         current_date = datetime.datetime.now().date()
+#         date_diff = abs((delivery_date - current_date).days)
+#         threshold_days = CONFIG.get('delivery_date_threshold_days', 7)
+#
+#         if date_diff > threshold_days:
+#             print(
+#                 f">>> 交付日期异常检测: 当前日期 {current_date}, 交付日期 {delivery_date}, 差值 {date_diff} 天 > 阈值 {threshold_days} 天")
+#             return True
+#         else:
+#             return False
+#     except Exception as e:
+#         print(f">>> 交付日期解析失败: {delivery_date_str}, 错误: {e}")
+#         return False
 
 
 def smart_clean_with_db(text, style_db):
     """基于款号库的智能款号清理"""
     if not text: return text
+
+    # 处理OCR常见识别错误，将可能误识别的字母替换为数字
+    ocr_char_map = {'J': '1', 'O': '0', 'I': '1', 'S': '5', 'Z': '2'}
+    for wrong_char, correct_char in ocr_char_map.items():
+        if wrong_char in text:
+            corrected_text = text.replace(wrong_char, correct_char)
+            if corrected_text in style_db:
+                return corrected_text
+
+
+    # 定义11种不同的文本清理策略，从简单到复杂，覆盖各种可能的文本格式
+    text = text.rstrip('#')
+    text = text.rstrip('款')
+    text = text.upper()
+    text = text.rstrip('#')
+    text = text.rstrip('款')
+
     if text in style_db: return text
 
     for db_style in style_db:
@@ -121,34 +138,7 @@ def smart_clean_with_db(text, style_db):
             elif count == 1:
                 return db_style
 
-    ocr_char_map = {'J': '1', 'O': '0', 'I': '1', 'S': '5', 'Z': '2'}
-    for wrong_char, correct_char in ocr_char_map.items():
-        if wrong_char in text:
-            corrected_text = text.replace(wrong_char, correct_char)
-            if corrected_text in style_db:
-                return corrected_text
-
-    text_clean_hash = text.rstrip('#') if text.endswith('#') else text
-    text_clean_kuan = text.rstrip('款') if text.endswith('款') else text
-
-    cleaning_strategies = [
-        text_clean_hash,
-        text_clean_kuan,
-        text.rstrip('款型式号'),
-        text.split('款')[0].strip(),
-        text.split('型')[0].strip(),
-        text.split('式')[0].strip(),
-        text.replace(' ', ''),
-        text.upper(),
-        text.upper().rstrip('款型式号'),
-        text.upper().rstrip('#'),
-        text.upper().rstrip('款'),
-    ]
-
-    for candidate in cleaning_strategies:
-        if candidate and candidate in style_db:
-            return candidate
-
+    #如果所有策略都未匹配成功,去除末尾'款型式号'并去除首尾空格的文本
     return text.rstrip('款型式号').strip()
 
 
@@ -227,28 +217,46 @@ def determine_final_style(json_data, style_db):
     candidates = json_data.get("style_candidates", [])
     if not candidates: return None
 
-    for item in candidates:
-        clean_text = item['text'].strip()
-        if "表格" in item.get('position', '') and clean_text in style_db:
-            cleaned = smart_clean_with_db(clean_text, style_db)
-            print(f"✅ 命中规则1 (表格内且在库): {cleaned}")
-            return cleaned
+    # ========== 阶段1：预处理 - 统一清理所有候选项 ==========
+    print(f">>> 开始预处理 {len(candidates)} 个候选款号...")
 
+    for item in candidates:
+        original_text = item['text'].strip()
+
+        # 调用 smart_clean_with_db 获取清理后的标准款号
+        cleaned_text = smart_clean_with_db(original_text, style_db)
+
+        # 存储清理结果（保留原始文本）
+        item['cleaned_text'] = cleaned_text
+        item['is_in_db'] = (cleaned_text in style_db)
+
+        if item['is_in_db']:
+            print(f"   ✓ 预处理命中: {original_text} → {cleaned_text}")
+        else:
+            print(f"   • 预处理未命中: {original_text} → {cleaned_text}")
+
+    # ========== 阶段2：规则匹配 - 按优先级选择最终款号 ==========
+
+    # 规则1：表格内且在库
+    for item in candidates:
+        if "表格" in item.get('position', '') and item['is_in_db']:
+            print(f"✅ 命中规则1 (表格内且在库): {item['cleaned_text']}")
+            return item['cleaned_text']
+
+    # 规则2：红色字体且在库
     red_candidates = [c for c in candidates if c.get('is_red') == True]
     for item in red_candidates:
-        clean_text = item['text'].strip()
-        if clean_text in style_db:
-            cleaned = smart_clean_with_db(clean_text, style_db)
-            print(f"✅ 命中规则2 (红色字体且在库): {cleaned}")
-            return cleaned
+        if item['is_in_db']:
+            print(f"✅ 命中规则2 (红色字体且在库): {item['cleaned_text']}")
+            return item['cleaned_text']
 
+    # 规则3：符合命名规律
     for item in candidates:
-        text = item['text'].strip().upper()
-        if text.startswith(('T', 'H', 'X', 'D', 'L', 'S', 'F')):
-            cleaned = smart_clean_with_db(text, style_db)
-            print(f"✅ 命中规则3 (符合命名规律): {cleaned}")
-            return cleaned
+        if item['cleaned_text'].upper().startswith(('T', 'H', 'X', 'D', 'L', 'S', 'F')):
+            print(f"✅ 命中规则3 (符合命名规律): {item['cleaned_text']}")
+            return item['cleaned_text']
 
+    print("❌ 所有规则均未匹配")
     return None
 
 
@@ -282,6 +290,7 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
 
         if CONFIG.get('use_llm_image_parsing', True):
             parsed_data = extract_data_from_image_dmx(img_path, current_prompt)
+            # parsed_data = extract_data_from_image_gemini(img_path, current_prompt)
         else:
             # 测试桩数据
             parsed_data = {
@@ -338,29 +347,30 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
                     'final_style': parsed_data.get('final_selected_style', '')
                 }
 
-        delivery_date = parsed_data.get('delivery_date', '')
-        if delivery_date and should_use_dmx_for_date_check(delivery_date):
-            print(f">>> 交付日期异常: {delivery_date}，使用DMX重新校验...")
-            dmx_date_data = extract_data_from_image_dmx(img_path, current_prompt, 0)
-            if dmx_date_data and 'error' not in dmx_date_data:
-                print(">>> DMX日期校验返回成功，更新数据")
-                temp_supplier = normalize_supplier_name(dmx_date_data.get('supplier_name'), LOCAL_SUPPLIER_DB)
-                if temp_supplier:
-                    parsed_data = dmx_date_data
-                    parsed_data['supplier_name'] = temp_supplier
-                    # 添加采购助理信息
-                    if LOCAL_PURCHASER_MAPPING:
-                        purchaser = LOCAL_PURCHASER_MAPPING.get(temp_supplier, "不存在")
-                        parsed_data['purchaser'] = purchaser
-                    final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
-                    parsed_data['final_selected_style'] = final_style
-                    parsed_data['used_dmx_for_date_check'] = True
-                else:
-                    print("   ⚠️ DMX日期校验数据的供应商无法匹配，仅更新日期字段")
-                    parsed_data['delivery_date'] = dmx_date_data.get('delivery_date')
-            else:
-                print(">>> DMX日期校验失败，保留原数据")
-                parsed_data['dmx_recheck_failed'] = True
+        #换用 dmx 大模型做直接的图像ocr，就不进行日期判断了，这个是阿里模型会出现的问题
+        # delivery_date = parsed_data.get('delivery_date', '')
+        # if delivery_date and should_use_dmx_for_date_check(delivery_date):
+        #     print(f">>> 交付日期异常: {delivery_date}，使用DMX重新校验...")
+        #     dmx_date_data = extract_data_from_image_dmx(img_path, current_prompt, 0)
+        #     if dmx_date_data and 'error' not in dmx_date_data:
+        #         print(">>> DMX日期校验返回成功，更新数据")
+        #         temp_supplier = normalize_supplier_name(dmx_date_data.get('supplier_name'), LOCAL_SUPPLIER_DB)
+        #         if temp_supplier:
+        #             parsed_data = dmx_date_data
+        #             parsed_data['supplier_name'] = temp_supplier
+        #             # 添加采购助理信息
+        #             if LOCAL_PURCHASER_MAPPING:
+        #                 purchaser = LOCAL_PURCHASER_MAPPING.get(temp_supplier, "不存在")
+        #                 parsed_data['purchaser'] = purchaser
+        #             final_style = determine_final_style(parsed_data, LOCAL_STYLE_DB)
+        #             parsed_data['final_selected_style'] = final_style
+        #             parsed_data['used_dmx_for_date_check'] = True
+        #         else:
+        #             print("   ⚠️ DMX日期校验数据的供应商无法匹配，仅更新日期字段")
+        #             parsed_data['delivery_date'] = dmx_date_data.get('delivery_date')
+        #     else:
+        #         print(">>> DMX日期校验失败，保留原数据")
+        #         parsed_data['dmx_recheck_failed'] = True
 
         valid_prefixes = tuple(CONFIG.get('valid_style_prefixes', ['T', 'H', 'X', 'D']))
         max_retries = CONFIG.get('image_recognition_max_retries', 3)
@@ -375,7 +385,7 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
 
             for retry_attempt in range(1, max_retries + 1):
                 print(f">>> 第{retry_attempt}次重试(款号)...")
-                retry_parsed_data = extract_data_from_image_dmx(img_path, current_prompt)
+                retry_parsed_data = extract_data_from_image(img_path, current_prompt)
                 retry_count = retry_attempt + 1
                 if retry_parsed_data and 'error' not in retry_parsed_data:
                     retry_final_style = determine_final_style(retry_parsed_data, LOCAL_STYLE_DB)
@@ -417,7 +427,7 @@ def parse_single_image(img_path, db_manager, LOCAL_STYLE_DB, LOCAL_SUPPLIER_DB, 
         parsed_data['retry_count'] = retry_count
         if failure_reason: parsed_data['failure_reason'] = failure_reason
 
-        # 应用物料扣减价格调整
+        # 物料扣减价格调整
         if LOCAL_MATERIAL_DEDUCTION_DB and deduction_suppliers:
             try:
                 adjusted_data, has_adjustment = apply_material_deduction(

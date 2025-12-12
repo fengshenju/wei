@@ -207,77 +207,6 @@ def call_llm_text(prompt_text, attempt=0):
         print(f">>> 文本分析失败: {e}")
         return {"error": str(e), "used_api_key": api_key if api_key else "N/A"}
 
-
-def call_gjllm_text(prompt_text, attempt=0):
-    model_name = "openai/Pro/deepseek-ai/DeepSeek-V3.1-Terminus"
-
-    print(f">>> 正在执行纯文本任务...")
-    print(f">>> 使用模型: {model_name}")
-
-    try:
-        # 1. 构造消息
-        final_content = f"{prompt_text}\n\n请直接返回纯 JSON 格式的数据，不要包含 markdown 标记。"
-        messages = [{"role": "user", "content": final_content}]
-
-        # 2. 获取 API Key (支持轮转重试)
-        api_key = get_api_key('gjllm_api_key', attempt)
-        if not api_key:
-            print("!!! 错误: 未配置 gjllm_api_key")
-            return {"status": "fail", "reason": "API Key缺失"}
-
-        # 3. 构造请求参数
-        # litellm.completion 的标准参数是 api_base 和 api_key
-        request_params = {
-            "model": model_name,
-            "messages": messages,
-            "temperature": 0.01,
-            "max_tokens": 4000,
-            "api_key": api_key,
-            "api_base": "https://api.siliconflow.cn/v1",
-            # 可选: 显式指定不用缓存以测试连通性，正式用可去掉
-            "drop_params": True
-        }
-
-        print(f">>> 发起 LLM 请求 (Text)...")
-
-        # 4. 调用 litellm
-        response = completion(**request_params)
-
-        content = response.choices[0].message.content.strip()
-
-        # 5. 数据清洗
-        cleaned_content = content
-        if cleaned_content.startswith("```json"):
-            cleaned_content = cleaned_content[7:]
-        elif cleaned_content.startswith("```"):
-            cleaned_content = cleaned_content[3:]
-
-        if cleaned_content.endswith("```"):
-            cleaned_content = cleaned_content[:-3]
-
-        try:
-            result_json = json.loads(cleaned_content.strip())
-            # 添加使用的API key信息
-            result_json['used_api_key'] = api_key if api_key else "N/A"
-            return result_json
-        except json.JSONDecodeError:
-            print(f">>> 警告: 模型返回的不是标准 JSON:\n{content}")
-            return {"raw_text": content, "used_api_key": api_key if api_key else "N/A"}
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f">>> 文本分析失败: {e}")
-        # 返回失败结构，防止主程序 RPA 崩溃
-        return {
-            "status": "fail",
-            "global_reason": f"LLM调用异常: {str(e)}",
-            "matched_record_ids": [],
-            "detail_analysis": [],
-            "used_api_key": api_key if api_key else "N/A"
-        }
-
-
 def call_dmxllm_text(prompt_text, attempt=0):
     """
     调用DMX大模型接口进行文本处理
@@ -517,7 +446,6 @@ def extract_data_from_image_gemini(image_path, prompt_instructions, attempt=0):
         # 2. 获取配置信息
         api_key = get_api_key('gemini_api_key', attempt)
         model = CONFIG.get('gemini_model', 'gemini-2.0-flash')
-        resolution = CONFIG.get('gemini_image_resolution', 'high')
         max_tokens = CONFIG.get('gemini_max_tokens', 4000)
 
         if not api_key:
@@ -525,7 +453,6 @@ def extract_data_from_image_gemini(image_path, prompt_instructions, attempt=0):
             return {"error": "API Key缺失", "used_api_key": "N/A"}
 
         print(f">>> 使用模型: {model}")
-        print(f">>> 图片分辨率级别: {resolution}")
 
         # 3. 读取图片文件（直接读取字节数据，不需要 base64 编码）
         with open(image_path, 'rb') as f:
@@ -548,14 +475,10 @@ def extract_data_from_image_gemini(image_path, prompt_instructions, attempt=0):
         # 5. 构造请求内容
         final_content = f"{prompt_instructions}\n\n请直接返回纯 JSON 格式的数据，不要包含 markdown 标记。"
 
-        # 构造带 media_resolution 的图片 Part
-        media_resolution_value = f"media_resolution_{resolution}"
-        image_part = types.Part(
-            inline_data=types.Blob(
-                mime_type=mime_type,
-                data=image_bytes
-            ),
-            media_resolution={"level": media_resolution_value}
+        # 构造图片 Part（使用官方推荐的 from_bytes 方法）
+        image_part = types.Part.from_bytes(
+            data=image_bytes,
+            mime_type=mime_type
         )
 
         # 6. 发起 API 请求
