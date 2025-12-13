@@ -32,6 +32,7 @@ def archive_success_image(img_path, parsed_data):
     格式：采购助理_品牌_供应商_合计金额_序号.png
     """
     try:
+        print("123")
         archive_dir = CONFIG.get('success_archive_path')
         if not archive_dir or not os.path.exists(img_path):
             return
